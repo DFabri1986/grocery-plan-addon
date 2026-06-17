@@ -130,8 +130,9 @@ export default function GroceryPlanner() {
       left.forEach((r) => lines.push(`  [ ] ${r.label}`));
       lines.push("");
     };
-    group("Food essentials", derived.list.map((r) => ({ got: gGet("f_" + r.id), label: `${r.item}  ×${(+r.qty.toFixed(2))}` })));
-    group("Non-food essentials", nonFoodRows.map((r) => ({ got: gGet("n_" + r.id), label: `${r.item}  ×${(+num(r.qty).toFixed(2))}` })));
+    const withUnit = (n, unit) => `×${n}${unit ? " " + unit : ""}`;
+    group("Food essentials", derived.list.map((r) => ({ got: gGet("f_" + r.id), label: `${r.item}  ${withUnit(+r.qty.toFixed(2), r.unit)}` })));
+    group("Non-food essentials", nonFoodRows.map((r) => ({ got: gGet("n_" + r.id), label: `${r.item}  ${withUnit(+num(r.qty).toFixed(2), r.unit)}` })));
     group("Extras", data.extras.map((e) => ({ got: gGet("x_" + e.id), label: `${e.item}  ×${(+num(e.qty).toFixed(2))}` })));
     const text = `GROCERY LIST (${data.period})\n\n` + lines.join("\n");
     try { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* */ }
@@ -407,7 +408,7 @@ function Grocery({ data, derived, nonFoodRows, totals, aGet, aSet, gGet, gTog, s
         <ListTable
           rows={derived.list.map((r) => ({
             key: "f_" + r.id, item: r.item, sub: r.times.join(" · "), category: r.category,
-            qty: +r.qty.toFixed(2), est: r.cost,
+            qty: +r.qty.toFixed(2), unit: r.unit, est: r.cost,
           }))}
           aGet={aGet} aSet={aSet} gGet={gGet} gTog={gTog}
           empty="No food yet — add meals to your week plan and they'll appear here."
@@ -441,6 +442,7 @@ function Grocery({ data, derived, nonFoodRows, totals, aGet, aSet, gGet, gTog, s
                   <td style={td()} className="text-center">
                     <input value={r.qty} onChange={(e) => setNonFood(r.id, { qty: e.target.value })} inputMode="decimal"
                       className="w-14 text-center bg-transparent outline-none" style={{ fontFamily: MONO }} />
+                    {r.unit ? <span className="text-xs" style={{ color: C.sub }}> {r.unit}</span> : null}
                   </td>
                   <td style={td()} className="text-right"><Money v={r.cost} /></td>
                   <td style={td()} className="text-center">
@@ -610,7 +612,7 @@ function ListTable({ rows, aGet, aSet, gGet, gTog, empty, totalEst, accent }) {
                 {r.sub && <div className="text-xs" style={{ color: C.sub }}>{r.sub}</div>}
               </td>
               <td style={td()} className="text-xs">{r.category}</td>
-              <td style={td()} className="text-center" ><span style={{ fontFamily: MONO }}>{r.qty}</span></td>
+              <td style={td()} className="text-center"><span style={{ fontFamily: MONO }}>{r.qty}</span>{r.unit ? <span className="text-xs" style={{ color: C.sub }}> {r.unit}</span> : null}</td>
               <td style={td()} className="text-right"><Money v={r.est} /></td>
               <td style={td()} className="text-center">
                 <input value={aGet(r.key)} onChange={(e) => aSet(r.key, e.target.value)} inputMode="decimal" placeholder="—"

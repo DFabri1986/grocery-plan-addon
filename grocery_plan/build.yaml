@@ -1,8 +1,0 @@
-# Maps each supported architecture to its Home Assistant Python base image.
-# The Dockerfile also declares an ARG BUILD_FROM default, so it still builds
-# standalone on newer Supervisors that no longer inject BUILD_FROM.
-build_from:
-  aarch64: ghcr.io/home-assistant/aarch64-base-python:3.13-alpine3.24
-  amd64: ghcr.io/home-assistant/amd64-base-python:3.13-alpine3.24
-labels:
-  io.hass.type: addon

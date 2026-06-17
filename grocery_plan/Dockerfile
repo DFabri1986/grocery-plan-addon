@@ -1,10 +1,12 @@
 # syntax=docker/dockerfile:1
 
-# BUILD_FROM is provided per-arch by the Home Assistant builder (build.yaml).
-# It MUST be declared as a global ARG — before the first FROM — so it is in
-# scope for the runtime FROM in stage 2 of this multi-stage build. The default
-# lets `docker build` succeed standalone (e.g. for amd64 CI).
-ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.13-alpine3.24
+# Base image is set directly here (build.yaml is deprecated since Supervisor
+# 2026.04.0, which no longer injects BUILD_FROM). base-python is a multi-arch
+# manifest, so the Supervisor's `--platform` selects the right aarch64/amd64
+# variant. Declared as a global ARG (before the first FROM) so it is in scope
+# for the runtime FROM in stage 2 and can still be overridden for a standalone
+# `docker build --build-arg BUILD_FROM=...`.
+ARG BUILD_FROM=ghcr.io/home-assistant/base-python:3.13-alpine3.24
 
 # ---------------------------------------------------------------------------
 # Stage 1 — build the React (Vite) frontend

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.3 — 2026-06-17
+
+- Show the unit of measurement next to quantities on the Grocery Plan, so
+  "Apples / bananas 1.9" reads "1.9 kg" rather than being ambiguous. Units also
+  appear on the non-food list and in the copied shopping list.
+- Remove the deprecated `build.yaml` and set the base image directly in the
+  Dockerfile (a multi-arch `base-python` manifest; the Supervisor's `--platform`
+  picks the right arch). Clears the "build.yaml is deprecated" warning and
+  follows the current Home Assistant convention.
+
 ## 1.0.2 — 2026-06-17
 
 - Grocery list quantities now round **up** to whole shopping units (you can't

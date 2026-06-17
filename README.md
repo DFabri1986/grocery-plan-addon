@@ -15,8 +15,8 @@ handles authentication.
 ├── grocery_planner.jsx        # the original React component (kept for reference)
 ├── grocery_plan/              # the Home Assistant add-on (copy THIS into /addons)
 │   ├── config.yaml            # add-on metadata, ingress, options schema
-│   ├── build.yaml             # per-arch HA base images
 │   ├── Dockerfile             # multi-stage: build React → Django runtime
+│                              #   (base image set here; build.yaml is deprecated)
 │   ├── run.sh                 # bashio startup: migrate → seed → gunicorn
 │   ├── icon.png / logo.png    # add-on artwork (placeholders)
 │   ├── README.md / DOCS.md / CHANGELOG.md
@@ -52,14 +52,14 @@ Full usage, configuration and admin instructions: [`grocery_plan/DOCS.md`](groce
 ## Build / validate locally
 
 ```bash
-# Build the amd64 image exactly as the brief requires:
 cd grocery_plan
-docker build \
-  --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.13-alpine3.24 \
-  -t grocery-plan:amd64 .
+# The base image (a multi-arch manifest) is set in the Dockerfile, so a plain
+# build picks the host architecture. To force a specific arch, add e.g.
+# --platform linux/amd64.
+docker build -t grocery-plan .
 
 # Run it standalone (Ingress is simulated by the relative-path handling):
-docker run --rm -p 8099:8099 -v "$PWD/_data:/data" grocery-plan:amd64
+docker run --rm -p 8099:8099 -v "$PWD/_data:/data" grocery-plan
 # then open http://localhost:8099/
 ```
 
@@ -73,7 +73,7 @@ simply drop the folder into `/addons` on a live instance — invalid keys surfac
 as install errors. A plain YAML linter catches syntax issues:
 
 ```bash
-yamllint grocery_plan/config.yaml grocery_plan/build.yaml
+yamllint grocery_plan/config.yaml
 ```
 
 ## How the shared, near-real-time sync works
