@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.1 — 2026-06-17
+
+- Fix Docker build failure on install: declare `ARG BUILD_FROM` as a global
+  build arg (before the first `FROM`) so it is in scope for the runtime stage's
+  `FROM` in the multi-stage build. Previously the build failed with
+  "base name (${BUILD_FROM}) should not be blank".
+- Point `url` at the real repository.
+
 ## 1.0.0 — 2026-06-17
 
 Initial release.

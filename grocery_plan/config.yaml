@@ -1,12 +1,12 @@
 name: Grocery Plan
-version: "1.0.0"
+version: "1.0.1"
 slug: grocery_plan
 description: >-
   Shared family meal planner and grocery budget. Plan meals once and the
   shopping list builds itself. Two people edit the same data and see each
   other's changes within a few seconds. Auth is handled by Home Assistant
   Ingress — no separate login.
-url: https://github.com/example/grocery-plan-addon
+url: https://github.com/DFabri1986/grocery-plan-addon
 # Home Assistant officially supports only arm64 and amd64.
 arch:
   - aarch64
