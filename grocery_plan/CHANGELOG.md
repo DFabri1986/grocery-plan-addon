@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.2 — 2026-06-17
+
+- Grocery list quantities now round **up** to whole shopping units (you can't
+  buy 2.7 loaves of bread → 3), and the estimated cost and budget totals use
+  the rounded quantity. Loose weight/volume units (kg, g, L, mL) stay
+  fractional. The "food spend by meal time" breakdown is split proportionally
+  so it still adds up to the food total.
+
 ## 1.0.1 — 2026-06-17
 
 - Fix Docker build failure on install: declare `ARG BUILD_FROM` as a global

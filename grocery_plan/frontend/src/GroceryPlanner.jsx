@@ -22,6 +22,16 @@ const CATEGORIES = [
   "Baby & Kids", "Pet",
 ];
 
+/* ---------- shopping-unit rounding ----------
+   You can't buy 2.7 loaves, so aggregated shopping quantities round UP — except
+   for loose weight/volume units (kg, g, L…), where a fraction is fine. */
+const DIVISIBLE_UNITS = new Set([
+  "kg", "kgs", "g", "gram", "grams", "kilogram", "kilograms",
+  "l", "ml", "litre", "litres", "liter", "liters",
+]);
+const isDivisibleUnit = (u) => DIVISIBLE_UNITS.has(String(u || "").trim().toLowerCase());
+const roundQty = (q, unit) => (isDivisibleUnit(unit) ? q : Math.ceil(q - 1e-9));
+
 /* ---------- small UI helpers ---------- */
 const Btn = ({ children, onClick, tone = "ghost", title, style }) => {
   const tones = {
@@ -52,6 +62,8 @@ export default function GroceryPlanner() {
     if (!data) return { list: [], byMeal: {}, total: 0 };
     const map = {};
     const byMeal = { Breakfast: 0, Recess: 0, Lunch: 0, Dinner: 0, Snacks: 0 };
+    // Pass 1: aggregate the raw (fractional) quantity per item, tracking how
+    // much each meal time contributes so we can split the cost afterwards.
     DAYS.forEach((day) => MEALTIMES.forEach((mt) => {
       (data.week[day]?.[mt] || []).forEach((mealId) => {
         const meal = data.meals.find((m) => m.id === mealId);
@@ -59,18 +71,27 @@ export default function GroceryPlanner() {
         meal.items.forEach((ing) => {
           const pb = data.priceBook.find((p) => p.id === ing.itemId);
           if (!pb || !pb.isFood) return;
-          const cost = num(ing.qty) * num(pb.price);
-          if (!map[pb.id]) map[pb.id] = { id: pb.id, item: pb.item, category: pb.category, unit: pb.unit, qty: 0, cost: 0, times: {} };
-          map[pb.id].qty += num(ing.qty);
-          map[pb.id].cost += cost;
+          const q = num(ing.qty);
+          if (!map[pb.id]) map[pb.id] = { id: pb.id, item: pb.item, category: pb.category, unit: pb.unit, price: num(pb.price), rawQty: 0, timeQty: {}, times: {} };
+          map[pb.id].rawQty += q;
+          map[pb.id].timeQty[mt] = (map[pb.id].timeQty[mt] || 0) + q;
           map[pb.id].times[mt] = true;
-          byMeal[mt] += cost;
         });
       });
     }));
-    const list = Object.values(map)
-      .map((x) => ({ ...x, times: MEALTIMES.filter((t) => x.times[t]) }))
-      .sort((a, b) => a.category.localeCompare(b.category) || a.item.localeCompare(b.item));
+    // Pass 2: round the shopping quantity up to whole units (except loose
+    // weight/volume units), recompute cost on the rounded quantity, and
+    // attribute that cost back to each meal time in proportion to its share.
+    const list = Object.values(map).map((x) => {
+      const qty = roundQty(x.rawQty, x.unit);
+      const cost = qty * x.price;
+      if (x.rawQty > 0) {
+        MEALTIMES.forEach((mt) => {
+          if (x.timeQty[mt]) byMeal[mt] += cost * (x.timeQty[mt] / x.rawQty);
+        });
+      }
+      return { id: x.id, item: x.item, category: x.category, unit: x.unit, qty, cost, times: MEALTIMES.filter((t) => x.times[t]) };
+    }).sort((a, b) => a.category.localeCompare(b.category) || a.item.localeCompare(b.item));
     return { list, byMeal, total: list.reduce((s, x) => s + x.cost, 0) };
   }, [data]);
 
