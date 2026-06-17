@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.sqlite3
+secret_key
+.venv/
+venv/
+
+# Node
+node_modules/
+
+# Build output — rebuilt by the Docker frontend stage; not committed
+grocery_plan/frontend/dist/
+grocery_plan/app/frontend_dist/
+grocery_plan/app/staticfiles/
+
+# Local data / OS
+_data/
+.DS_Store

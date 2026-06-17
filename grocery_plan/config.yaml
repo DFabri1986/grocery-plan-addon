@@ -1,0 +1,35 @@
+name: Grocery Plan
+version: "1.0.0"
+slug: grocery_plan
+description: >-
+  Shared family meal planner and grocery budget. Plan meals once and the
+  shopping list builds itself. Two people edit the same data and see each
+  other's changes within a few seconds. Auth is handled by Home Assistant
+  Ingress — no separate login.
+url: https://github.com/example/grocery-plan-addon
+# Home Assistant officially supports only arm64 and amd64.
+arch:
+  - aarch64
+  - amd64
+# s6-overlay v3 base image -> disable Docker's default init.
+init: false
+# Auth + access are delegated entirely to Home Assistant Ingress.
+ingress: true
+ingress_port: 8099
+# Show in the sidebar for every Home Assistant user (not just admins).
+panel_icon: mdi:cart
+panel_title: Grocery Plan
+panel_admin: false
+# The SQLite DB and secret key live under /data — the add-on's own persistent
+# volume, always mounted and captured by HA backups (no map entry needed).
+# User-tunable settings, read at startup via bashio.
+options:
+  currency_symbol: "$"
+  poll_interval: 3
+  default_period: Week
+  log_level: info
+schema:
+  currency_symbol: str
+  poll_interval: int(1,60)
+  default_period: str
+  log_level: list(trace|debug|info|notice|warning|error|fatal)

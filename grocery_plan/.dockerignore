@@ -1,0 +1,10 @@
+**/__pycache__
+**/*.pyc
+**/*.pyo
+frontend/node_modules
+frontend/dist
+app/staticfiles
+app/frontend_dist
+**/*.sqlite3
+**/secret_key
+.venv
