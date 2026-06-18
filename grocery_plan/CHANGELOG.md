@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.0 — 2026-06-18
+
+- **Price book sorting & filtering:** click any column header on the Prices tab
+  to sort (toggle asc/desc), and use the filter bar to search by name and
+  filter by category, food/non-food, and supplier (incl. "Unassigned"), with a
+  live "showing X of Y" count and a Clear button.
+
 ## 1.2.0 — 2026-06-18
 
 - **Shop by supplier:** the Grocery Plan now has a "what to buy where"

@@ -594,8 +594,13 @@ function Grocery({ data, derived, nonFoodRows, totals, aGet, aSet, gGet, gTog, s
 function Prices({ data, setData, reload }) {
   const [importing, setImporting] = useState(false);
   const [look, setLook] = useState({}); // priceId -> { state: load|ok|err, msg }
+  const [sort, setSort] = useState({ key: "item", dir: 1 });
+  const [filter, setFilter] = useState({ q: "", category: "", food: "", supplier: "" });
   const suppliers = data.suppliers || [];
   const supName = (sid) => suppliers.find((s) => s.id === sid)?.name;
+  const supNameOf = (p) => supName(p.supplierId) || "";
+  const toggleSort = (key) => setSort((s) => (s.key === key ? { key, dir: -s.dir } : { key, dir: 1 }));
+  const filterActive = filter.q || filter.category || filter.food || filter.supplier;
   const upd = (priceBook) => setData({ ...data, priceBook });
   const setP = (id, p) => upd(data.priceBook.map((x) => (x.id === id ? { ...x, ...p } : x)));
   const refresh = async (p) => {
@@ -619,7 +624,25 @@ function Prices({ data, setData, reload }) {
   };
   const add = () => upd([...data.priceBook, { id: uid(), item: "New item", price: 0, unit: "ea", category: "Pantry & Dry", isFood: true, supplierId: null }]);
   const del = (id) => upd(data.priceBook.filter((x) => x.id !== id));
-  const sorted = [...data.priceBook].sort((a, b) => (a.isFood === b.isFood ? 0 : a.isFood ? -1 : 1) || a.category.localeCompare(b.category) || a.item.localeCompare(b.item));
+  const matches = (p) => {
+    if (filter.q && !p.item.toLowerCase().includes(filter.q.toLowerCase())) return false;
+    if (filter.category && p.category !== filter.category) return false;
+    if (filter.food === "food" && !p.isFood) return false;
+    if (filter.food === "non" && p.isFood) return false;
+    if (filter.supplier === "__none" && p.supplierId) return false;
+    if (filter.supplier && filter.supplier !== "__none" && p.supplierId !== filter.supplier) return false;
+    return true;
+  };
+  const cmp = (a, b) => {
+    const k = sort.key; let r = 0;
+    if (k === "price") r = num(a.price) - num(b.price);
+    else if (k === "isFood") r = a.isFood === b.isFood ? 0 : a.isFood ? -1 : 1;
+    else if (k === "supplier") r = supNameOf(a).localeCompare(supNameOf(b));
+    else r = String(a[k] || "").localeCompare(String(b[k] || ""));
+    if (r === 0) r = a.item.localeCompare(b.item);
+    return r * sort.dir;
+  };
+  const sorted = data.priceBook.filter(matches).sort(cmp);
 
   return (
     <div>
@@ -635,11 +658,38 @@ function Prices({ data, setData, reload }) {
         Import a Coles or Woolworths order PDF to add items automatically.
       </p>
       {importing && <ImportReceipts suppliers={suppliers} reload={reload} onClose={() => setImporting(false)} />}
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <input value={filter.q} onChange={(e) => setFilter((f) => ({ ...f, q: e.target.value }))} placeholder="Search items…"
+          className="text-sm rounded px-2 py-1 outline-none" style={{ border: `1px solid ${C.line}`, minWidth: 180 }} />
+        <select value={filter.category} onChange={(e) => setFilter((f) => ({ ...f, category: e.target.value }))}
+          className="text-sm rounded px-2 py-1 outline-none bg-white" style={{ border: `1px solid ${C.line}` }}>
+          <option value="">All categories</option>
+          {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select value={filter.food} onChange={(e) => setFilter((f) => ({ ...f, food: e.target.value }))}
+          className="text-sm rounded px-2 py-1 outline-none bg-white" style={{ border: `1px solid ${C.line}` }}>
+          <option value="">Food &amp; non-food</option>
+          <option value="food">Food only</option>
+          <option value="non">Non-food only</option>
+        </select>
+        <select value={filter.supplier} onChange={(e) => setFilter((f) => ({ ...f, supplier: e.target.value }))}
+          className="text-sm rounded px-2 py-1 outline-none bg-white" style={{ border: `1px solid ${C.line}` }}>
+          <option value="">All suppliers</option>
+          {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          <option value="__none">Unassigned</option>
+        </select>
+        <span className="text-xs" style={{ color: C.sub }}>{sorted.length} of {data.priceBook.length}</span>
+        {filterActive && <button onClick={() => setFilter({ q: "", category: "", food: "", supplier: "" })} className="text-xs font-medium" style={{ color: C.dark }}>Clear</button>}
+      </div>
       <div className="overflow-x-auto rounded-lg" style={{ border: `1px solid ${C.line}` }}>
         <table className="w-full text-sm border-collapse" style={{ minWidth: 760 }}>
           <thead><tr>
-            {["Item", "Price", "Unit", "Category", "Food?", "Supplier", ""].map((h, i) => (
-              <th key={i} style={th(C.mid)} className={i === 1 ? "text-center" : "text-left"}>{h}</th>
+            {[{ l: "Item", k: "item" }, { l: "Price", k: "price" }, { l: "Unit", k: "unit" }, { l: "Category", k: "category" }, { l: "Food?", k: "isFood" }, { l: "Supplier", k: "supplier" }, { l: "", k: null }].map((h, i) => (
+              <th key={i} style={{ ...th(C.mid), cursor: h.k ? "pointer" : "default", userSelect: "none" }}
+                className={i === 1 ? "text-center" : "text-left"}
+                onClick={h.k ? () => toggleSort(h.k) : undefined}>
+                {h.l}{sort.key === h.k && h.k ? (sort.dir === 1 ? " ▲" : " ▼") : ""}
+              </th>
             ))}
           </tr></thead>
           <tbody>
