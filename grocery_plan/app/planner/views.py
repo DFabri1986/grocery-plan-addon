@@ -16,6 +16,7 @@ from .models import (
     PriceItem,
     Settings,
     ShopState,
+    Supplier,
 )
 from .serializers import (
     ExtraSerializer,
@@ -24,7 +25,9 @@ from .serializers import (
     PriceItemSerializer,
     SettingsSerializer,
     ShopStateSerializer,
+    SupplierSerializer,
 )
+from . import receipts
 
 
 def _f(value):
@@ -70,6 +73,11 @@ class ShopStateViewSet(viewsets.ModelViewSet):
     lookup_field = "key"
 
 
+class SupplierViewSet(viewsets.ModelViewSet):
+    queryset = Supplier.objects.all()
+    serializer_class = SupplierSerializer
+
+
 # --------------------------------------------------------------------------- #
 #  Singleton settings
 # --------------------------------------------------------------------------- #
@@ -100,9 +108,12 @@ def build_state():
             "unit": p.unit,
             "category": p.category,
             "isFood": p.is_food,
+            "supplierId": str(p.supplier_id) if p.supplier_id else None,
         }
         for p in price_items
     ]
+
+    suppliers = [{"id": str(s.id), "name": s.name} for s in Supplier.objects.all()]
 
     meals = [
         {
@@ -128,7 +139,10 @@ def build_state():
     ]
 
     extras = [
-        {"id": str(e.id), "item": e.item, "qty": _f(e.qty), "price": _f(e.price)}
+        {
+            "id": str(e.id), "item": e.item, "qty": _f(e.qty), "price": _f(e.price),
+            "supplierId": str(e.supplier_id) if e.supplier_id else None,
+        }
         for e in Extra.objects.all()
     ]
 
@@ -149,6 +163,7 @@ def build_state():
         "extras": extras,
         "actuals": actuals,
         "got": got,
+        "suppliers": suppliers,
     }
 
 
@@ -224,3 +239,102 @@ class ShopView(APIView):
         ShopState.objects.exclude(key__in=keys).delete()
         st = build_state()
         return Response({"actuals": st["actuals"], "got": st["got"]})
+
+
+# --------------------------------------------------------------------------- #
+#  Receipt import: parse uploaded Coles/Woolworths PDFs -> review -> commit
+# --------------------------------------------------------------------------- #
+def _supplier_for_vendor(vendor):
+    if vendor in ("Coles", "Woolworths"):
+        return Supplier.objects.get_or_create(name=vendor)[0]
+    return None
+
+
+class ImportParseView(APIView):
+    """Accept one or more order PDFs, return de-duplicated parsed items for
+    review. No database writes."""
+
+    def post(self, request):
+        files = request.FILES.getlist("files")
+        if not files:
+            return Response({"detail": "No files uploaded."}, status=400)
+
+        existing = {p.item.lower(): p for p in PriceItem.objects.all()}
+        merged = {}  # name_lower -> item dict (keep most recent by date)
+        vendors, parsed_files = set(), 0
+        for f in files:
+            try:
+                result = receipts.parse_receipt(f.read())
+            except Exception as exc:  # noqa: BLE001 - surface parse errors per file
+                return Response(
+                    {"detail": f"Could not parse {f.name}: {exc}"}, status=422
+                )
+            if result["vendor"] != "Unknown":
+                vendors.add(result["vendor"])
+            parsed_files += 1
+            date = result.get("date") or ""
+            for it in result["items"]:
+                key = it["name"].lower()
+                prev = merged.get(key)
+                if prev is None or date >= prev["_date"]:
+                    supplier = _supplier_for_vendor(it["vendor"])
+                    cur = existing.get(key)
+                    merged[key] = {
+                        "name": it["name"],
+                        "price": it["price"],
+                        "unit": it["unit"],
+                        "category": it["category"],
+                        "isFood": it["isFood"],
+                        "supplierId": supplier.id if supplier else None,
+                        "supplierName": supplier.name if supplier else None,
+                        "vendor": it["vendor"],
+                        "action": "update" if cur else "new",
+                        "currentPrice": _f(cur.price) if cur else None,
+                        "_date": date,
+                    }
+        items = sorted(merged.values(), key=lambda x: (x["category"], x["name"]))
+        for it in items:
+            it.pop("_date", None)
+        return Response({
+            "items": items,
+            "summary": {
+                "files": parsed_files,
+                "items": len(items),
+                "vendors": sorted(vendors),
+                "new": sum(1 for i in items if i["action"] == "new"),
+                "update": sum(1 for i in items if i["action"] == "update"),
+            },
+        })
+
+
+class ImportCommitView(APIView):
+    """Upsert reviewed items into the price book (match by name, case-insensitive)."""
+
+    @transaction.atomic
+    def post(self, request):
+        items = request.data.get("items", []) or []
+        created = updated = 0
+        for it in items:
+            name = (it.get("name") or "").strip()
+            if not name:
+                continue
+            supplier = None
+            if it.get("supplierId"):
+                supplier = Supplier.objects.filter(pk=it["supplierId"]).first()
+            defaults = {
+                "price": _to_decimal(it.get("price")) or 0,
+                "unit": it.get("unit") or "ea",
+                "category": it.get("category") or "Pantry & Dry",
+                "is_food": bool(it.get("isFood")),
+                "supplier": supplier,
+            }
+            existing = PriceItem.objects.filter(item__iexact=name).first()
+            if existing:
+                for k, v in defaults.items():
+                    setattr(existing, k, v)
+                existing.save()
+                updated += 1
+            else:
+                PriceItem.objects.create(item=name, **defaults)
+                created += 1
+        return Response({"created": created, "updated": updated})

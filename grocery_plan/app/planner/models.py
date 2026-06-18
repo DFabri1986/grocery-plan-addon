@@ -31,12 +31,27 @@ class Settings(models.Model):
         return f"Budget {self.budget} / {self.period}"
 
 
+class Supplier(models.Model):
+    """A place items are bought from (Coles, Woolworths, Who Gives A Crap…)."""
+
+    name = models.CharField(max_length=120, unique=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
 class PriceItem(models.Model):
     item = models.CharField(max_length=200)
     price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     unit = models.CharField(max_length=40, default="ea")
     category = models.CharField(max_length=80, default="Pantry & Dry")
     is_food = models.BooleanField(default=True)
+    supplier = models.ForeignKey(
+        Supplier, null=True, blank=True, on_delete=models.SET_NULL, related_name="items"
+    )
 
     class Meta:
         ordering = ["item"]
@@ -98,6 +113,9 @@ class Extra(models.Model):
     item = models.CharField(max_length=200, blank=True, default="")
     qty = models.DecimalField(max_digits=10, decimal_places=3, default=1)
     price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    supplier = models.ForeignKey(
+        Supplier, null=True, blank=True, on_delete=models.SET_NULL, related_name="extras"
+    )
 
     def __str__(self):
         return self.item or "(extra)"

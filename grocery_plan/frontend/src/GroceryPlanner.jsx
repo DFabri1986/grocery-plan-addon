@@ -1,9 +1,9 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import {
   Plus, Trash2, Check, Copy, RotateCcw, ChevronDown, ChevronRight,
-  CalendarDays, ShoppingCart, BookOpen, Tag, X, CheckCircle2,
+  CalendarDays, ShoppingCart, BookOpen, Tag, X, CheckCircle2, Upload,
 } from "lucide-react";
-import { money, num, uid, useSyncedData } from "./api";
+import { money, num, uid, useSyncedData, parseReceipts, commitImport } from "./api";
 
 /* ---------- palette + type ---------- */
 const C = {
@@ -47,6 +47,14 @@ const Btn = ({ children, onClick, tone = "ghost", title, style }) => {
 };
 const Money = ({ v, bold, color }) => (
   <span style={{ fontFamily: MONO, fontWeight: bold ? 700 : 500, color: color || C.ink }}>{money(v)}</span>
+);
+const SupplierSelect = ({ suppliers, value, onChange }) => (
+  <select value={value || ""} onChange={(e) => onChange(e.target.value || null)}
+    className="rounded outline-none bg-transparent text-xs"
+    style={{ border: `1px solid ${C.line}`, color: C.dark, padding: "2px 4px", maxWidth: 130 }}>
+    <option value="">—</option>
+    {(suppliers || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+  </select>
 );
 
 /* ============================================================= */
@@ -192,7 +200,7 @@ export default function GroceryPlanner() {
       <div className="p-3 sm:p-6">
         {tab === "week" && <WeekPlan data={data} setData={setData} />}
         {tab === "meals" && <Meals data={data} setData={setData} />}
-        {tab === "prices" && <Prices data={data} setData={setData} />}
+        {tab === "prices" && <Prices data={data} setData={setData} reload={reload} />}
         {tab === "grocery" && (
           <Grocery
             data={data} derived={derived} nonFoodRows={nonFoodRows}
@@ -355,6 +363,11 @@ function Meals({ data, setData }) {
 /* ============================================================= GROCERY */
 function Grocery({ data, derived, nonFoodRows, totals, aGet, aSet, gGet, gTog, setData, copyList, copied }) {
   const balColor = (v) => (v < 0 ? C.red : C.ok);
+  const suppliers = data.suppliers || [];
+  const pbById = Object.fromEntries(data.priceBook.map((p) => [p.id, p]));
+  // Supplier on a grocery row lives on the underlying price-book item.
+  const setPriceSupplier = (priceId, supplierId) =>
+    setData({ ...data, priceBook: data.priceBook.map((p) => (p.id === priceId ? { ...p, supplierId } : p)) });
 
   const addNonFood = () => { const food = data.priceBook.find((p) => !p.isFood) || data.priceBook[0]; setData({ ...data, nonFood: [...data.nonFood, { id: uid(), itemId: food.id, qty: 1 }] }); };
   const setNonFood = (id, p) => setData({ ...data, nonFood: data.nonFood.map((r) => (r.id === id ? { ...r, ...p } : r)) });
@@ -407,10 +420,11 @@ function Grocery({ data, derived, nonFoodRows, totals, aGet, aSet, gGet, gTog, s
         </div>
         <ListTable
           rows={derived.list.map((r) => ({
-            key: "f_" + r.id, item: r.item, sub: r.times.join(" · "), category: r.category,
-            qty: +r.qty.toFixed(2), unit: r.unit, est: r.cost,
+            key: "f_" + r.id, pid: r.id, item: r.item, sub: r.times.join(" · "), category: r.category,
+            qty: +r.qty.toFixed(2), unit: r.unit, est: r.cost, supplierId: pbById[r.id]?.supplierId,
           }))}
           aGet={aGet} aSet={aSet} gGet={gGet} gTog={gTog}
+          suppliers={suppliers} onSupplier={setPriceSupplier}
           empty="No food yet — add meals to your week plan and they'll appear here."
           totalEst={derived.total} accent={C.dark}
         />
@@ -425,7 +439,7 @@ function Grocery({ data, derived, nonFoodRows, totals, aGet, aSet, gGet, gTog, s
         <div className="overflow-x-auto rounded-lg" style={{ border: `1px solid ${C.line}` }}>
           <table className="w-full text-sm border-collapse" style={{ minWidth: 620 }}>
             <thead><tr>
-              {["Item", "Category", "Qty", "Est. $", "Actual $", "Got", ""].map((h, i) => (
+              {["Item", "Category", "Qty", "Est. $", "Actual $", "Got", "Supplier", ""].map((h, i) => (
                 <th key={i} style={th(C.amber)} className={i >= 2 && i <= 4 ? "text-center" : "text-left"}>{h}</th>
               ))}
             </tr></thead>
@@ -450,6 +464,7 @@ function Grocery({ data, derived, nonFoodRows, totals, aGet, aSet, gGet, gTog, s
                       className="w-16 text-right bg-transparent outline-none" style={{ fontFamily: MONO, color: "#0000CC" }} />
                   </td>
                   <td style={td()} className="text-center"><Tick on={gGet("n_" + r.id)} onClick={() => gTog("n_" + r.id)} /></td>
+                  <td style={td()}><SupplierSelect suppliers={suppliers} value={pbById[r.itemId]?.supplierId} onChange={(v) => setPriceSupplier(r.itemId, v)} /></td>
                   <td style={td()} className="text-right"><button onClick={() => delNonFood(r.id)} style={{ color: C.red }}><X size={14} /></button></td>
                 </tr>
               ))}
@@ -457,7 +472,7 @@ function Grocery({ data, derived, nonFoodRows, totals, aGet, aSet, gGet, gTog, s
             <tfoot><tr style={{ background: C.amber, color: "#fff" }}>
               <td style={td()} className="font-bold" colSpan={3}>Non-food total</td>
               <td style={td()} className="text-right font-bold"><Money v={totals.nonFoodEst} color="#fff" bold /></td>
-              <td style={td()} colSpan={3}></td>
+              <td style={td()} colSpan={4}></td>
             </tr></tfoot>
           </table>
         </div>
@@ -472,7 +487,7 @@ function Grocery({ data, derived, nonFoodRows, totals, aGet, aSet, gGet, gTog, s
         <div className="overflow-x-auto rounded-lg" style={{ border: `1px solid ${C.line}` }}>
           <table className="w-full text-sm border-collapse" style={{ minWidth: 620 }}>
             <thead><tr>
-              {["Item", "Qty", "Price", "Est. $", "Actual $", "Got", ""].map((h, i) => (
+              {["Item", "Qty", "Price", "Est. $", "Actual $", "Got", "Supplier", ""].map((h, i) => (
                 <th key={i} style={th(C.blue)} className={i >= 1 && i <= 4 ? "text-center" : "text-left"}>{h}</th>
               ))}
             </tr></thead>
@@ -497,6 +512,7 @@ function Grocery({ data, derived, nonFoodRows, totals, aGet, aSet, gGet, gTog, s
                       className="w-16 text-right bg-transparent outline-none" style={{ fontFamily: MONO, color: "#0000CC" }} />
                   </td>
                   <td style={td()} className="text-center"><Tick on={gGet("x_" + e.id)} onClick={() => gTog("x_" + e.id)} /></td>
+                  <td style={td()}><SupplierSelect suppliers={suppliers} value={e.supplierId} onChange={(v) => setExtra(e.id, { supplierId: v })} /></td>
                   <td style={td()} className="text-right"><button onClick={() => delExtra(e.id)} style={{ color: C.red }}><X size={14} /></button></td>
                 </tr>
               ))}
@@ -504,7 +520,7 @@ function Grocery({ data, derived, nonFoodRows, totals, aGet, aSet, gGet, gTog, s
             <tfoot><tr style={{ background: C.blue, color: "#fff" }}>
               <td style={td()} className="font-bold" colSpan={3}>Extras total</td>
               <td style={td()} className="text-right font-bold"><Money v={totals.extrasEst} color="#fff" bold /></td>
-              <td style={td()} colSpan={3}></td>
+              <td style={td()} colSpan={4}></td>
             </tr></tfoot>
           </table>
         </div>
@@ -519,10 +535,12 @@ function Grocery({ data, derived, nonFoodRows, totals, aGet, aSet, gGet, gTog, s
 }
 
 /* ============================================================= PRICES */
-function Prices({ data, setData }) {
+function Prices({ data, setData, reload }) {
+  const [importing, setImporting] = useState(false);
+  const suppliers = data.suppliers || [];
   const upd = (priceBook) => setData({ ...data, priceBook });
   const setP = (id, p) => upd(data.priceBook.map((x) => (x.id === id ? { ...x, ...p } : x)));
-  const add = () => upd([...data.priceBook, { id: uid(), item: "New item", price: 0, unit: "ea", category: "Pantry & Dry", isFood: true }]);
+  const add = () => upd([...data.priceBook, { id: uid(), item: "New item", price: 0, unit: "ea", category: "Pantry & Dry", isFood: true, supplierId: null }]);
   const del = (id) => upd(data.priceBook.filter((x) => x.id !== id));
   const sorted = [...data.priceBook].sort((a, b) => (a.isFood === b.isFood ? 0 : a.isFood ? -1 : 1) || a.category.localeCompare(b.category) || a.item.localeCompare(b.item));
 
@@ -530,16 +548,20 @@ function Prices({ data, setData }) {
     <div>
       <div className="flex items-center justify-between mb-1">
         <SectionTitle>Price Book</SectionTitle>
-        <Btn tone="solid" onClick={add}><Plus size={15} />Add item</Btn>
+        <div className="flex items-center gap-2">
+          <Btn tone="ghost" onClick={() => setImporting((v) => !v)}><Upload size={15} />Import receipt</Btn>
+          <Btn tone="solid" onClick={add}><Plus size={15} />Add item</Btn>
+        </div>
       </div>
       <p className="text-sm mb-3" style={{ color: C.sub }}>
         Your master list of items and prices. Meals and the grocery plan all pull from here — update a price once and everything recalculates.
-        Rough mid-2026 ballparks to start; overwrite with your own receipt prices.
+        Import a Coles or Woolworths order PDF to add items automatically.
       </p>
+      {importing && <ImportReceipts suppliers={suppliers} reload={reload} onClose={() => setImporting(false)} />}
       <div className="overflow-x-auto rounded-lg" style={{ border: `1px solid ${C.line}` }}>
-        <table className="w-full text-sm border-collapse" style={{ minWidth: 680 }}>
+        <table className="w-full text-sm border-collapse" style={{ minWidth: 760 }}>
           <thead><tr>
-            {["Item", "Price", "Unit", "Category", "Food?", ""].map((h, i) => (
+            {["Item", "Price", "Unit", "Category", "Food?", "Supplier", ""].map((h, i) => (
               <th key={i} style={th(C.mid)} className={i === 1 ? "text-center" : "text-left"}>{h}</th>
             ))}
           </tr></thead>
@@ -565,12 +587,111 @@ function Prices({ data, setData }) {
                     {p.isFood ? "Food" : "Non-food"}
                   </button>
                 </td>
+                <td style={td()}><SupplierSelect suppliers={suppliers} value={p.supplierId} onChange={(v) => setP(p.id, { supplierId: v })} /></td>
                 <td style={td()} className="text-right"><button onClick={() => del(p.id)} style={{ color: C.red }}><Trash2 size={14} /></button></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+/* ---------- receipt import panel ---------- */
+function ImportReceipts({ suppliers, reload, onClose }) {
+  const [items, setItems] = useState(null);
+  const [summary, setSummary] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const onFiles = async (e) => {
+    const files = [...e.target.files];
+    if (!files.length) return;
+    setBusy(true); setError(null);
+    try {
+      const res = await parseReceipts(files);
+      setItems(res.items.map((it) => ({ ...it, include: true })));
+      setSummary(res.summary);
+    } catch (err) { setError(String(err.message || err)); }
+    setBusy(false);
+  };
+  const setItem = (i, p) => setItems((arr) => arr.map((it, j) => (j === i ? { ...it, ...p } : it)));
+  const chosen = items ? items.filter((it) => it.include) : [];
+
+  const doImport = async () => {
+    if (!chosen.length) return;
+    setBusy(true); setError(null);
+    try {
+      await commitImport(chosen);
+      await reload();
+      onClose();
+    } catch (err) { setError(String(err.message || err)); setBusy(false); }
+  };
+
+  return (
+    <div className="mb-3 rounded-lg p-3" style={{ border: `1px solid ${C.line}`, background: C.band }}>
+      <div className="flex items-center justify-between mb-2">
+        <div className="font-semibold" style={{ color: C.dark }}>Import from a Coles / Woolworths order PDF</div>
+        <button onClick={onClose} style={{ color: C.sub }}><X size={16} /></button>
+      </div>
+      {!items && (
+        <div>
+          <input type="file" accept="application/pdf,.pdf" multiple onChange={onFiles} className="text-sm" />
+          <p className="text-xs mt-1" style={{ color: C.sub }}>
+            Pick one or more order PDFs. They're parsed and shown for review — nothing is added until you hit Import.
+          </p>
+        </div>
+      )}
+      {busy && <div className="text-sm mt-1" style={{ color: C.sub }}>Working…</div>}
+      {error && <div className="text-sm mt-1" style={{ color: C.red }}>{error}</div>}
+      {items && (
+        <div>
+          <div className="text-xs mb-2" style={{ color: C.sub }}>
+            {summary.items} items from {summary.files} file(s) · {summary.vendors.join(", ") || "—"} · {summary.new} new, {summary.update} update
+          </div>
+          <div className="overflow-auto rounded" style={{ border: `1px solid ${C.line}`, maxHeight: 380 }}>
+            <table className="w-full text-sm border-collapse" style={{ minWidth: 740 }}>
+              <thead><tr>
+                {["", "Item", "Price", "Unit", "Category", "Food?", "Supplier", ""].map((h, i) => (
+                  <th key={i} style={th(C.dark)}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {items.map((it, i) => (
+                  <tr key={i} style={{ background: it.include ? "#fff" : "#F1F3F2", opacity: it.include ? 1 : 0.5 }}>
+                    <td style={td()}><input type="checkbox" checked={it.include} onChange={(e) => setItem(i, { include: e.target.checked })} /></td>
+                    <td style={td()}><input value={it.name} onChange={(e) => setItem(i, { name: e.target.value })} className="w-full bg-transparent outline-none" style={{ minWidth: 220 }} /></td>
+                    <td style={td()} className="text-center">
+                      <input value={it.price} onChange={(e) => setItem(i, { price: num(e.target.value) })} inputMode="decimal"
+                        className="w-16 text-right bg-transparent outline-none" style={{ fontFamily: MONO, color: "#0000CC" }} />
+                      {it.action === "update" && it.currentPrice != null && <div className="text-xs" style={{ color: C.sub }}>was {money(it.currentPrice)}</div>}
+                    </td>
+                    <td style={td()}><input value={it.unit} onChange={(e) => setItem(i, { unit: e.target.value })} className="w-14 bg-transparent outline-none" /></td>
+                    <td style={td()}>
+                      <select value={it.category} onChange={(e) => setItem(i, { category: e.target.value })} className="bg-transparent outline-none text-xs">
+                        {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+                      </select>
+                    </td>
+                    <td style={td()} className="text-center">
+                      <button onClick={() => setItem(i, { isFood: !it.isFood })} className="px-2 py-0.5 rounded text-xs font-semibold"
+                        style={{ background: it.isFood ? C.light : "#F0E6DA", color: it.isFood ? C.dark : C.amber }}>
+                        {it.isFood ? "Food" : "Non-food"}
+                      </button>
+                    </td>
+                    <td style={td()}><SupplierSelect suppliers={suppliers} value={it.supplierId} onChange={(v) => setItem(i, { supplierId: v })} /></td>
+                    <td style={{ ...td(), color: C.sub }} className="text-xs">{it.action}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center gap-2 mt-2">
+            <Btn tone="solid" onClick={doImport}>Import {chosen.length} item{chosen.length === 1 ? "" : "s"}</Btn>
+            <Btn tone="ghost" onClick={() => { setItems(null); setSummary(null); }}>Choose different files</Btn>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -594,13 +715,13 @@ const Tick = ({ on, onClick }) => (
     {on && <Check size={14} color="#fff" />}
   </button>
 );
-function ListTable({ rows, aGet, aSet, gGet, gTog, empty, totalEst, accent }) {
+function ListTable({ rows, aGet, aSet, gGet, gTog, empty, totalEst, accent, suppliers, onSupplier }) {
   if (!rows.length) return <div className="text-sm px-3 py-4 rounded-lg" style={{ border: `1px solid ${C.line}`, color: C.sub }}>{empty}</div>;
   return (
     <div className="overflow-x-auto rounded-lg" style={{ border: `1px solid ${C.line}` }}>
-      <table className="w-full text-sm border-collapse" style={{ minWidth: 640 }}>
+      <table className="w-full text-sm border-collapse" style={{ minWidth: 720 }}>
         <thead><tr>
-          {["Item", "Category", "Qty", "Est. $", "Actual $", "Got"].map((h, i) => (
+          {["Item", "Category", "Qty", "Est. $", "Actual $", "Got", "Supplier"].map((h, i) => (
             <th key={i} style={th(accent)} className={i >= 2 && i <= 4 ? "text-center" : "text-left"}>{h}</th>
           ))}
         </tr></thead>
@@ -619,13 +740,14 @@ function ListTable({ rows, aGet, aSet, gGet, gTog, empty, totalEst, accent }) {
                   className="w-16 text-right bg-transparent outline-none" style={{ fontFamily: MONO, color: "#0000CC" }} />
               </td>
               <td style={td()} className="text-center"><Tick on={gGet(r.key)} onClick={() => gTog(r.key)} /></td>
+              <td style={td()}><SupplierSelect suppliers={suppliers} value={r.supplierId} onChange={(v) => onSupplier(r.pid, v)} /></td>
             </tr>
           ))}
         </tbody>
         <tfoot><tr style={{ background: accent, color: "#fff" }}>
           <td style={td()} className="font-bold" colSpan={3}>Food total</td>
           <td style={td()} className="text-right font-bold"><Money v={totalEst} color="#fff" bold /></td>
-          <td style={td()} colSpan={2}></td>
+          <td style={td()} colSpan={3}></td>
         </tr></tfoot>
       </table>
     </div>

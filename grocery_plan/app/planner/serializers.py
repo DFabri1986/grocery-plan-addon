@@ -8,6 +8,7 @@ from .models import (
     PriceItem,
     Settings,
     ShopState,
+    Supplier,
 )
 
 # Field names are camelCase to match the React data shape, so the frontend can
@@ -20,12 +21,22 @@ class SettingsSerializer(serializers.ModelSerializer):
         fields = ["budget", "period"]
 
 
+class SupplierSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Supplier
+        fields = ["id", "name"]
+
+
 class PriceItemSerializer(serializers.ModelSerializer):
     isFood = serializers.BooleanField(source="is_food", required=False)
+    supplierId = serializers.PrimaryKeyRelatedField(
+        source="supplier", queryset=Supplier.objects.all(),
+        required=False, allow_null=True,
+    )
 
     class Meta:
         model = PriceItem
-        fields = ["id", "item", "price", "unit", "category", "isFood"]
+        fields = ["id", "item", "price", "unit", "category", "isFood", "supplierId"]
 
 
 class MealIngredientSerializer(serializers.ModelSerializer):
@@ -82,9 +93,14 @@ class NonFoodEssentialSerializer(serializers.ModelSerializer):
 
 
 class ExtraSerializer(serializers.ModelSerializer):
+    supplierId = serializers.PrimaryKeyRelatedField(
+        source="supplier", queryset=Supplier.objects.all(),
+        required=False, allow_null=True,
+    )
+
     class Meta:
         model = Extra
-        fields = ["id", "item", "qty", "price"]
+        fields = ["id", "item", "qty", "price", "supplierId"]
 
 
 class ShopStateSerializer(serializers.ModelSerializer):

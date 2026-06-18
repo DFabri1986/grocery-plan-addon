@@ -43,7 +43,7 @@ export async function pushDiff(api, prev, next) {
     const p = byId(prev.priceBook), n = byId(next.priceBook);
     for (const id of Object.keys(p)) if (!(id in n)) await api(`prices/${id}/`, "DELETE");
     for (const it of next.priceBook) {
-      const payload = { item: it.item, price: num(it.price), unit: it.unit, category: it.category, isFood: !!it.isFood };
+      const payload = { item: it.item, price: num(it.price), unit: it.unit, category: it.category, isFood: !!it.isFood, supplierId: it.supplierId ?? null };
       if (!(it.id in p)) { const r = await api("prices/", "POST", payload); if (r) idMap.price[it.id] = String(r.id); }
       else if (!deepEqual(p[it.id], it)) await api(`prices/${it.id}/`, "PATCH", payload);
     }
@@ -73,7 +73,7 @@ export async function pushDiff(api, prev, next) {
     const p = byId(prev.extras), n = byId(next.extras);
     for (const id of Object.keys(p)) if (!(id in n)) await api(`extras/${id}/`, "DELETE");
     for (const e of next.extras) {
-      const payload = { item: e.item, qty: num(e.qty), price: num(e.price) };
+      const payload = { item: e.item, qty: num(e.qty), price: num(e.price), supplierId: e.supplierId ?? null };
       if (!(e.id in p)) { const r = await api("extras/", "POST", payload); if (r) idMap.extra[e.id] = String(r.id); }
       else if (!deepEqual(p[e.id], e)) await api(`extras/${e.id}/`, "PATCH", payload);
     }

@@ -10,7 +10,14 @@ from .models import (
     PriceItem,
     Settings,
     ShopState,
+    Supplier,
 )
+
+
+@admin.register(Supplier)
+class SupplierAdmin(ModelAdmin):
+    list_display = ("name",)
+    search_fields = ("name",)
 
 
 @admin.register(Settings)
@@ -27,10 +34,10 @@ class SettingsAdmin(ModelAdmin):
 
 @admin.register(PriceItem)
 class PriceItemAdmin(ModelAdmin):
-    list_display = ("item", "price", "unit", "category", "is_food")
-    list_filter = ("is_food", "category")
+    list_display = ("item", "price", "unit", "category", "is_food", "supplier")
+    list_filter = ("is_food", "category", "supplier")
     search_fields = ("item",)
-    list_editable = ("price", "is_food")
+    list_editable = ("price", "is_food", "supplier")
 
 
 class MealIngredientInline(TabularInline):
@@ -62,7 +69,7 @@ class NonFoodEssentialAdmin(ModelAdmin):
 
 @admin.register(Extra)
 class ExtraAdmin(ModelAdmin):
-    list_display = ("item", "qty", "price")
+    list_display = ("item", "qty", "price", "supplier")
 
 
 @admin.register(ShopState)

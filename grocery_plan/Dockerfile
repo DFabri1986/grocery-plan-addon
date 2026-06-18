@@ -33,6 +33,10 @@ ENV LANG=C.UTF-8 \
 
 WORKDIR /app
 
+# poppler-utils provides `pdftotext`, used to parse uploaded Coles/Woolworths
+# receipt PDFs in the import feature.
+RUN apk add --no-cache poppler-utils
+
 # Python dependencies (all pure-Python wheels; no build toolchain needed).
 COPY app/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt

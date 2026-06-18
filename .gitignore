@@ -17,3 +17,6 @@ grocery_plan/app/staticfiles/
 # Local data / OS
 _data/
 .DS_Store
+
+# Personal order receipts (PII) — keep local only
+Past Orders/

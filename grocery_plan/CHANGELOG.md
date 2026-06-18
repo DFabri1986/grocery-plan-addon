@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.0 — 2026-06-18
+
+- **Import from receipts:** new *Import receipt* button on the Prices tab.
+  Upload one or more Coles or Woolworths order PDFs; they're parsed
+  (`pdftotext`), de-duplicated, categorised and priced, then shown in a review
+  table where you can edit/exclude rows before importing into the price book.
+  Existing items update in place; new ones are created.
+- **Suppliers:** a supplier list (seeded with Coles, Woolworths, Who Gives A
+  Crap) with a per-item supplier you can pick on the Prices tab and directly on
+  the Grocery Plan (food, non-food and extras). Imported items get their
+  supplier set automatically from the receipt's vendor.
+- Added `poppler-utils` to the image for PDF text extraction.
+
 ## 1.0.3 — 2026-06-17
 
 - Show the unit of measurement next to quantities on the Grocery Plan, so

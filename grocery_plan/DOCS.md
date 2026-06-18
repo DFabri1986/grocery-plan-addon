@@ -44,6 +44,22 @@ This is a **local** add-on.
 
 After changing options, **Restart** the add-on.
 
+## Importing from Coles / Woolworths receipts
+
+On the **Prices** tab, click **Import receipt** and choose one or more order PDFs
+(you can select many at once). The add-on parses them, de-duplicates the items
+(keeping the most recent price), guesses a category and unit, and shows
+everything in a review table. Adjust or untick rows, then **Import** — existing
+items update their price, new ones are added. Each item's **supplier** is set
+automatically from the receipt's vendor.
+
+## Suppliers
+
+A supplier list (seeded with **Coles**, **Woolworths** and **Who Gives A Crap**)
+lets you record where each item is bought. Pick a supplier per item on the
+**Prices** tab or directly on the **Grocery Plan** (food, non-food and extras).
+Add or rename suppliers in the Django admin.
+
 ## Managing your data (admin)
 
 The Django admin — themed with django-unfold — lets you bulk-edit data and is

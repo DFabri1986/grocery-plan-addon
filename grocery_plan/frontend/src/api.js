@@ -44,8 +44,20 @@ async function api(path, method = "GET", body) {
 /* ---------- empty/initial state ---------- */
 const EMPTY = {
   budget: 0, period: "Week", priceBook: [], meals: [], week: {},
-  nonFood: [], extras: [], actuals: {}, got: {},
+  nonFood: [], extras: [], actuals: {}, got: {}, suppliers: [],
 };
+
+/* ---------- receipt import (multipart upload, outside the sync engine) ---------- */
+export async function parseReceipts(files) {
+  const fd = new FormData();
+  for (const f of files) fd.append("files", f);
+  const res = await fetch(apiUrl("import/parse/"), { method: "POST", body: fd });
+  if (!res.ok) throw new Error(`Parse failed (${res.status})`);
+  return res.json();
+}
+export async function commitImport(items) {
+  return api("import/commit/", "POST", { items });
+}
 
 const isEditing = () => ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName);
 
