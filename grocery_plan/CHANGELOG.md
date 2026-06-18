@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.0 — 2026-06-18
+
+- **Shop by supplier:** the Grocery Plan now has a "what to buy where"
+  breakdown — planned food, non-food and extras grouped by supplier, each with
+  a remaining-to-buy subtotal and a one-tap copy of that shop's list.
+- **Refresh current price:** a button next to each price on the Prices tab does
+  a best-effort live lookup from the item's supplier (Coles or Woolworths) and
+  updates the price. Best-effort only — the vendors bot-protect their sites, so
+  it can come back "no match"; it works from the add-on's home-network IP.
+
 ## 1.1.0 — 2026-06-18
 
 - **Import from receipts:** new *Import receipt* button on the Prices tab.

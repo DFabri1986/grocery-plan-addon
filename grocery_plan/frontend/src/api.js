@@ -58,6 +58,12 @@ export async function parseReceipts(files) {
 export async function commitImport(items) {
   return api("import/commit/", "POST", { items });
 }
+export async function lookupPrice(name, vendor) {
+  const url = apiUrl("lookup/") + `?name=${encodeURIComponent(name)}&vendor=${encodeURIComponent(vendor)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Lookup failed (${res.status})`);
+  return res.json();
+}
 
 const isEditing = () => ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName);
 

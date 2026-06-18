@@ -27,7 +27,7 @@ from .serializers import (
     ShopStateSerializer,
     SupplierSerializer,
 )
-from . import receipts
+from . import pricing, receipts
 
 
 def _f(value):
@@ -305,6 +305,23 @@ class ImportParseView(APIView):
                 "update": sum(1 for i in items if i["action"] == "update"),
             },
         })
+
+
+class PriceLookupView(APIView):
+    """Best-effort current price for an item from its vendor. Always 200;
+    {found: false} when blocked or not matched."""
+
+    def get(self, request):
+        name = (request.query_params.get("name") or "").strip()
+        vendor = (request.query_params.get("vendor") or "").strip()
+        if not name:
+            return Response({"found": False, "reason": "missing item name"})
+        if vendor not in ("Coles", "Woolworths"):
+            return Response({"found": False, "reason": "set a Coles or Woolworths supplier first"})
+        res = pricing.lookup_price(name, vendor)
+        if res and res.get("price"):
+            return Response({"found": True, "vendor": vendor, **res})
+        return Response({"found": False, "reason": f"no match at {vendor}"})
 
 
 class ImportCommitView(APIView):

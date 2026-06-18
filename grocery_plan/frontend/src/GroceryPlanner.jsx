@@ -1,9 +1,9 @@
 import React, { useState, useMemo, useRef } from "react";
 import {
   Plus, Trash2, Check, Copy, RotateCcw, ChevronDown, ChevronRight,
-  CalendarDays, ShoppingCart, BookOpen, Tag, X, CheckCircle2, Upload,
+  CalendarDays, ShoppingCart, BookOpen, Tag, X, CheckCircle2, Upload, RefreshCw, Store,
 } from "lucide-react";
-import { money, num, uid, useSyncedData, parseReceipts, commitImport } from "./api";
+import { money, num, uid, useSyncedData, parseReceipts, commitImport, lookupPrice } from "./api";
 
 /* ---------- palette + type ---------- */
 const C = {
@@ -378,6 +378,30 @@ function Grocery({ data, derived, nonFoodRows, totals, aGet, aSet, gGet, gTog, s
   const setExtra = (id, p) => setData({ ...data, extras: data.extras.map((e) => (e.id === id ? { ...e, ...p } : e)) });
   const delExtra = (id) => setData({ ...data, extras: data.extras.filter((e) => e.id !== id) });
 
+  /* ---- shop-by-supplier breakdown (what to buy where) ---- */
+  const supName = (sid) => suppliers.find((s) => s.id === sid)?.name;
+  const [copiedShop, setCopiedShop] = useState(null);
+  const shops = useMemo(() => {
+    const g = {};
+    const addLine = (sid, label, cost, got) => {
+      const k = sid || "__none";
+      if (!g[k]) g[k] = { id: sid, name: sid ? (supName(sid) || "Supplier") : "Unassigned", lines: [], total: 0, remaining: 0 };
+      g[k].lines.push({ label, cost, got });
+      g[k].total += cost;
+      if (!got) g[k].remaining += cost;
+    };
+    derived.list.forEach((r) => addLine(pbById[r.id]?.supplierId, `${r.item} ×${+r.qty.toFixed(2)}${r.unit ? " " + r.unit : ""}`, r.cost, gGet("f_" + r.id)));
+    nonFoodRows.forEach((r) => addLine(pbById[r.itemId]?.supplierId, `${r.item} ×${+num(r.qty).toFixed(2)}${r.unit ? " " + r.unit : ""}`, r.cost, gGet("n_" + r.id)));
+    data.extras.forEach((e) => { if (e.item || num(e.price)) addLine(e.supplierId, `${e.item || "(extra)"} ×${+num(e.qty).toFixed(2)}`, num(e.qty) * num(e.price), gGet("x_" + e.id)); });
+    return Object.values(g).sort((a, b) => (a.name === "Unassigned") - (b.name === "Unassigned") || b.total - a.total);
+  }, [data, derived, nonFoodRows]);
+
+  const copyShop = (shop) => {
+    const left = shop.lines.filter((l) => !l.got);
+    const text = `${shop.name.toUpperCase()} — ${data.period}\n\n` + left.map((l) => `  [ ] ${l.label}`).join("\n");
+    try { navigator.clipboard.writeText(text); setCopiedShop(shop.id || "__none"); setTimeout(() => setCopiedShop(null), 1500); } catch { /* */ }
+  };
+
   return (
     <div className="flex flex-col gap-5">
       {/* summary + meal-time split */}
@@ -530,6 +554,38 @@ function Grocery({ data, derived, nonFoodRows, totals, aGet, aSet, gGet, gTog, s
           </div>
         )}
       </div>
+
+      {/* shop by supplier — what to buy where */}
+      <div>
+        <SectionBar color={C.mid} title="Shop by supplier — what to buy where" />
+        <div className="grid gap-3 mt-2 sm:grid-cols-2 lg:grid-cols-3">
+          {shops.map((shop) => (
+            <div key={shop.id || "none"} className="rounded-lg overflow-hidden" style={{ border: `1px solid ${C.line}` }}>
+              <div className="flex items-center justify-between px-3 py-2" style={{ background: shop.name === "Unassigned" ? C.band : C.light }}>
+                <div className="inline-flex items-center gap-1.5 font-semibold" style={{ color: shop.name === "Unassigned" ? C.sub : C.dark }}>
+                  <Store size={14} />{shop.name}
+                </div>
+                <Btn tone="ghost" onClick={() => copyShop(shop)} style={{ padding: "2px 6px" }}>
+                  {copiedShop === (shop.id || "__none") ? <CheckCircle2 size={13} color={C.ok} /> : <Copy size={13} />}
+                </Btn>
+              </div>
+              <div className="px-3 py-2 text-sm" style={{ maxHeight: 180, overflowY: "auto" }}>
+                {shop.lines.map((l, i) => (
+                  <div key={i} className="flex items-center justify-between gap-2" style={{ opacity: l.got ? 0.5 : 1 }}>
+                    <span style={{ textDecoration: l.got ? "line-through" : "none" }}>{l.label}</span>
+                    <span style={{ fontFamily: MONO, color: C.sub }}>{money(l.cost)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-between px-3 py-2 text-sm" style={{ borderTop: `1px solid ${C.line}` }}>
+                <span style={{ color: C.sub }}>{shop.lines.filter((l) => !l.got).length} to buy</span>
+                <span><span style={{ color: C.sub, fontSize: 12 }}>left </span><Money v={shop.remaining} bold color={C.dark} /></span>
+              </div>
+            </div>
+          ))}
+          {!shops.length && <div className="text-sm" style={{ color: C.sub }}>Plan some meals and the per-shop breakdown appears here.</div>}
+        </div>
+      </div>
     </div>
   );
 }
@@ -537,9 +593,30 @@ function Grocery({ data, derived, nonFoodRows, totals, aGet, aSet, gGet, gTog, s
 /* ============================================================= PRICES */
 function Prices({ data, setData, reload }) {
   const [importing, setImporting] = useState(false);
+  const [look, setLook] = useState({}); // priceId -> { state: load|ok|err, msg }
   const suppliers = data.suppliers || [];
+  const supName = (sid) => suppliers.find((s) => s.id === sid)?.name;
   const upd = (priceBook) => setData({ ...data, priceBook });
   const setP = (id, p) => upd(data.priceBook.map((x) => (x.id === id ? { ...x, ...p } : x)));
+  const refresh = async (p) => {
+    const vendor = supName(p.supplierId);
+    if (vendor !== "Coles" && vendor !== "Woolworths") {
+      setLook((s) => ({ ...s, [p.id]: { state: "err", msg: "set Coles/Woolies supplier" } }));
+      return;
+    }
+    setLook((s) => ({ ...s, [p.id]: { state: "load" } }));
+    try {
+      const r = await lookupPrice(p.item, vendor);
+      if (r.found) {
+        setP(p.id, { price: num(r.price) });
+        setLook((s) => ({ ...s, [p.id]: { state: "ok", msg: `${vendor}: ${money(r.price)}` } }));
+      } else {
+        setLook((s) => ({ ...s, [p.id]: { state: "err", msg: r.reason || "no match" } }));
+      }
+    } catch {
+      setLook((s) => ({ ...s, [p.id]: { state: "err", msg: "lookup failed" } }));
+    }
+  };
   const add = () => upd([...data.priceBook, { id: uid(), item: "New item", price: 0, unit: "ea", category: "Pantry & Dry", isFood: true, supplierId: null }]);
   const del = (id) => upd(data.priceBook.filter((x) => x.id !== id));
   const sorted = [...data.priceBook].sort((a, b) => (a.isFood === b.isFood ? 0 : a.isFood ? -1 : 1) || a.category.localeCompare(b.category) || a.item.localeCompare(b.item));
@@ -570,9 +647,15 @@ function Prices({ data, setData, reload }) {
               <tr key={p.id} style={{ background: idx % 2 ? C.band : "#fff" }}>
                 <td style={td()}><input value={p.item} onChange={(e) => setP(p.id, { item: e.target.value })} className="w-full bg-transparent outline-none" /></td>
                 <td style={td()} className="text-center">
-                  <span style={{ color: C.sub }}>$</span>
-                  <input value={p.price} onChange={(e) => setP(p.id, { price: num(e.target.value) })} inputMode="decimal"
-                    className="w-16 text-right bg-transparent outline-none" style={{ fontFamily: MONO, color: "#0000CC" }} />
+                  <div className="inline-flex items-center gap-1">
+                    <span style={{ color: C.sub }}>$</span>
+                    <input value={p.price} onChange={(e) => setP(p.id, { price: num(e.target.value) })} inputMode="decimal"
+                      className="w-16 text-right bg-transparent outline-none" style={{ fontFamily: MONO, color: "#0000CC" }} />
+                    <button onClick={() => refresh(p)} title="Look up current price from supplier" style={{ color: C.sub }}>
+                      <RefreshCw size={12} className={look[p.id]?.state === "load" ? "animate-spin" : ""} />
+                    </button>
+                  </div>
+                  {look[p.id]?.msg && <div className="text-xs" style={{ color: look[p.id].state === "ok" ? C.ok : C.amber }}>{look[p.id].msg}</div>}
                 </td>
                 <td style={td()}><input value={p.unit} onChange={(e) => setP(p.id, { unit: e.target.value })} className="w-16 bg-transparent outline-none" /></td>
                 <td style={td()}>
