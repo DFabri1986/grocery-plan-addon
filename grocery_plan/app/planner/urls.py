@@ -20,5 +20,6 @@ urlpatterns = [
     path("import/parse/", views.ImportParseView.as_view(), name="import-parse"),
     path("import/commit/", views.ImportCommitView.as_view(), name="import-commit"),
     path("lookup/", views.PriceLookupView.as_view(), name="price-lookup"),
+    path("dedupe/", views.DedupeView.as_view(), name="dedupe"),
     path("", include(router.urls)),
 ]

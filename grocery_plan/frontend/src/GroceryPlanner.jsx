@@ -1,9 +1,9 @@
 import React, { useState, useMemo, useRef } from "react";
 import {
   Plus, Trash2, Check, Copy, RotateCcw, ChevronDown, ChevronRight,
-  CalendarDays, ShoppingCart, BookOpen, Tag, X, CheckCircle2, Upload, RefreshCw, Store,
+  CalendarDays, ShoppingCart, BookOpen, Tag, X, CheckCircle2, Upload, RefreshCw, Store, Layers,
 } from "lucide-react";
-import { money, num, uid, useSyncedData, parseReceipts, commitImport, lookupPrice } from "./api";
+import { money, num, uid, useSyncedData, parseReceipts, commitImport, lookupPrice, dedupePrices } from "./api";
 
 /* ---------- palette + type ---------- */
 const C = {
@@ -48,6 +48,18 @@ const Btn = ({ children, onClick, tone = "ghost", title, style }) => {
 const Money = ({ v, bold, color }) => (
   <span style={{ fontFamily: MONO, fontWeight: bold ? 700 : 500, color: color || C.ink }}>{money(v)}</span>
 );
+// Money input that always displays 2 decimal places when not being edited.
+function PriceInput({ value, onCommit, className, style }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState("");
+  const display = editing ? text : (Number(value) || 0).toFixed(2);
+  return (
+    <input value={display} inputMode="decimal" className={className} style={style}
+      onFocus={() => { setText(value === "" || value == null ? "" : String(value)); setEditing(true); }}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => { setEditing(false); onCommit(num(text)); }} />
+  );
+}
 const SupplierSelect = ({ suppliers, value, onChange }) => (
   <select value={value || ""} onChange={(e) => onChange(e.target.value || null)}
     className="rounded outline-none bg-transparent text-xs"
@@ -167,8 +179,8 @@ export default function GroceryPlanner() {
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5 px-2 py-1 rounded-md" style={{ background: C.yellow }}>
               <span className="text-xs font-semibold" style={{ color: C.dark }}>Budget</span>
-              <input value={data.budget} onChange={(e) => patch({ budget: num(e.target.value) })}
-                inputMode="decimal" className="w-20 bg-transparent outline-none text-right font-bold"
+              <PriceInput value={data.budget} onCommit={(v) => patch({ budget: v })}
+                className="w-20 bg-transparent outline-none text-right font-bold"
                 style={{ fontFamily: MONO, color: "#0000CC" }} />
               <span className="text-xs" style={{ color: C.sub }}>/</span>
               <input value={data.period} onChange={(e) => patch({ period: e.target.value })}
@@ -527,7 +539,7 @@ function Grocery({ data, derived, nonFoodRows, totals, aGet, aSet, gGet, gTog, s
                       className="w-14 text-center bg-transparent outline-none" style={{ fontFamily: MONO }} />
                   </td>
                   <td style={td()} className="text-center">
-                    <input value={e.price} onChange={(ev) => setExtra(e.id, { price: ev.target.value })} inputMode="decimal"
+                    <PriceInput value={e.price} onCommit={(v) => setExtra(e.id, { price: v })}
                       className="w-16 text-center bg-transparent outline-none" style={{ fontFamily: MONO }} />
                   </td>
                   <td style={td()} className="text-right"><Money v={num(e.qty) * num(e.price)} /></td>
@@ -603,24 +615,31 @@ function Prices({ data, setData, reload }) {
   const filterActive = filter.q || filter.category || filter.food || filter.supplier;
   const upd = (priceBook) => setData({ ...data, priceBook });
   const setP = (id, p) => upd(data.priceBook.map((x) => (x.id === id ? { ...x, ...p } : x)));
+  const supIdByName = (name) => suppliers.find((s) => s.name === name)?.id || null;
+  const applyVendor = (p, vendor, price) => setP(p.id, { price: num(price), supplierId: supIdByName(vendor) });
   const refresh = async (p) => {
-    const vendor = supName(p.supplierId);
-    if (vendor !== "Coles" && vendor !== "Woolworths") {
-      setLook((s) => ({ ...s, [p.id]: { state: "err", msg: "set Coles/Woolies supplier" } }));
-      return;
-    }
     setLook((s) => ({ ...s, [p.id]: { state: "load" } }));
     try {
-      const r = await lookupPrice(p.item, vendor);
-      if (r.found) {
-        setP(p.id, { price: num(r.price) });
-        setLook((s) => ({ ...s, [p.id]: { state: "ok", msg: `${vendor}: ${money(r.price)}` } }));
-      } else {
-        setLook((s) => ({ ...s, [p.id]: { state: "err", msg: r.reason || "no match" } }));
-      }
+      const r = await lookupPrice(p.item);
+      const results = r.results || {};
+      setLook((s) => ({ ...s, [p.id]: { state: "ok", results } }));
+      // auto-apply the current supplier's price if we got one
+      const cur = supName(p.supplierId);
+      if (cur && results[cur] && results[cur].price) setP(p.id, { price: num(results[cur].price) });
     } catch {
       setLook((s) => ({ ...s, [p.id]: { state: "err", msg: "lookup failed" } }));
     }
+  };
+  const [dedupeMsg, setDedupeMsg] = useState(null);
+  const runDedupe = async () => {
+    if (!window.confirm("Merge price-book items that have identical names? References are kept.")) return;
+    setDedupeMsg("Working…");
+    try {
+      const r = await dedupePrices();
+      await reload();
+      setDedupeMsg(r.removed ? `Removed ${r.removed} duplicate${r.removed === 1 ? "" : "s"}` : "No duplicates found");
+      setTimeout(() => setDedupeMsg(null), 3000);
+    } catch { setDedupeMsg("Dedupe failed"); }
   };
   const add = () => upd([...data.priceBook, { id: uid(), item: "New item", price: 0, unit: "ea", category: "Pantry & Dry", isFood: true, supplierId: null }]);
   const del = (id) => upd(data.priceBook.filter((x) => x.id !== id));
@@ -649,6 +668,8 @@ function Prices({ data, setData, reload }) {
       <div className="flex items-center justify-between mb-1">
         <SectionTitle>Price Book</SectionTitle>
         <div className="flex items-center gap-2">
+          {dedupeMsg && <span className="text-xs" style={{ color: C.sub }}>{dedupeMsg}</span>}
+          <Btn tone="ghost" onClick={runDedupe}><Layers size={15} />Dedupe</Btn>
           <Btn tone="ghost" onClick={() => setImporting((v) => !v)}><Upload size={15} />Import receipt</Btn>
           <Btn tone="solid" onClick={add}><Plus size={15} />Add item</Btn>
         </div>
@@ -699,13 +720,29 @@ function Prices({ data, setData, reload }) {
                 <td style={td()} className="text-center">
                   <div className="inline-flex items-center gap-1">
                     <span style={{ color: C.sub }}>$</span>
-                    <input value={p.price} onChange={(e) => setP(p.id, { price: num(e.target.value) })} inputMode="decimal"
+                    <PriceInput value={p.price} onCommit={(v) => setP(p.id, { price: v })}
                       className="w-16 text-right bg-transparent outline-none" style={{ fontFamily: MONO, color: "#0000CC" }} />
-                    <button onClick={() => refresh(p)} title="Look up current price from supplier" style={{ color: C.sub }}>
+                    <button onClick={() => refresh(p)} title="Look up current price at Coles & Woolworths" style={{ color: C.sub }}>
                       <RefreshCw size={12} className={look[p.id]?.state === "load" ? "animate-spin" : ""} />
                     </button>
                   </div>
-                  {look[p.id]?.msg && <div className="text-xs" style={{ color: look[p.id].state === "ok" ? C.ok : C.amber }}>{look[p.id].msg}</div>}
+                  {look[p.id]?.state === "err" && <div className="text-xs" style={{ color: C.amber }}>{look[p.id].msg}</div>}
+                  {look[p.id]?.results && (
+                    <div className="flex items-center justify-center gap-2 mt-0.5">
+                      {["Woolworths", "Coles"].map((v) => {
+                        const r = look[p.id].results[v];
+                        const isCur = supName(p.supplierId) === v;
+                        return r ? (
+                          <button key={v} onClick={() => applyVendor(p, v, r.price)} title={`Use ${v} price and set supplier`}
+                            className="text-xs rounded px-1" style={{ color: isCur ? C.dark : C.blue, fontWeight: isCur ? 700 : 500 }}>
+                            {v[0]} {money(r.price)}
+                          </button>
+                        ) : (
+                          <span key={v} className="text-xs" style={{ color: C.sub }}>{v[0]} —</span>
+                        );
+                      })}
+                    </div>
+                  )}
                 </td>
                 <td style={td()}><input value={p.unit} onChange={(e) => setP(p.id, { unit: e.target.value })} className="w-16 bg-transparent outline-none" /></td>
                 <td style={td()}>
@@ -796,7 +833,7 @@ function ImportReceipts({ suppliers, reload, onClose }) {
                     <td style={td()}><input type="checkbox" checked={it.include} onChange={(e) => setItem(i, { include: e.target.checked })} /></td>
                     <td style={td()}><input value={it.name} onChange={(e) => setItem(i, { name: e.target.value })} className="w-full bg-transparent outline-none" style={{ minWidth: 220 }} /></td>
                     <td style={td()} className="text-center">
-                      <input value={it.price} onChange={(e) => setItem(i, { price: num(e.target.value) })} inputMode="decimal"
+                      <PriceInput value={it.price} onCommit={(v) => setItem(i, { price: v })}
                         className="w-16 text-right bg-transparent outline-none" style={{ fontFamily: MONO, color: "#0000CC" }} />
                       {it.action === "update" && it.currentPrice != null && <div className="text-xs" style={{ color: C.sub }}>was {money(it.currentPrice)}</div>}
                     </td>

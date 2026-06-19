@@ -11,6 +11,7 @@ from .models import (
     MEAL_TIMES,
     Extra,
     Meal,
+    MealIngredient,
     NonFoodEssential,
     PlanAssignment,
     PriceItem,
@@ -308,20 +309,55 @@ class ImportParseView(APIView):
 
 
 class PriceLookupView(APIView):
-    """Best-effort current price for an item from its vendor. Always 200;
-    {found: false} when blocked or not matched."""
+    """Best-effort current price for an item from BOTH vendors. Always 200;
+    a vendor is null when blocked or not matched."""
 
     def get(self, request):
         name = (request.query_params.get("name") or "").strip()
-        vendor = (request.query_params.get("vendor") or "").strip()
         if not name:
-            return Response({"found": False, "reason": "missing item name"})
-        if vendor not in ("Coles", "Woolworths"):
-            return Response({"found": False, "reason": "set a Coles or Woolworths supplier first"})
-        res = pricing.lookup_price(name, vendor)
-        if res and res.get("price"):
-            return Response({"found": True, "vendor": vendor, **res})
-        return Response({"found": False, "reason": f"no match at {vendor}"})
+            return Response({"name": name, "results": {}})
+        results = {}
+        for vendor, fn in (("Woolworths", pricing.lookup_woolworths),
+                           ("Coles", pricing.lookup_coles)):
+            try:
+                r = fn(name)
+            except Exception:
+                r = None
+            results[vendor] = r if (r and r.get("price")) else None
+        return Response({"name": name, "results": results})
+
+
+class DedupeView(APIView):
+    """Merge price-book items that have identical names (case-insensitive,
+    whitespace-normalised). References (meal ingredients, non-food essentials)
+    are repointed to the kept item before duplicates are deleted."""
+
+    @transaction.atomic
+    def post(self, request):
+        from collections import defaultdict
+
+        groups = defaultdict(list)
+        for p in PriceItem.objects.all():
+            groups[" ".join(p.item.lower().split())].append(p)
+
+        removed = merged_groups = 0
+        for items in groups.values():
+            if len(items) < 2:
+                continue
+            merged_groups += 1
+            # Keep the best entry: prefer one with a supplier, then the newest.
+            items.sort(key=lambda p: (p.supplier_id is not None, p.id))
+            keep = items[-1]
+            tidy = " ".join(keep.item.split())
+            if tidy != keep.item:
+                keep.item = tidy
+                keep.save(update_fields=["item"])
+            dup_ids = [d.id for d in items[:-1]]
+            MealIngredient.objects.filter(item_id__in=dup_ids).update(item=keep)
+            NonFoodEssential.objects.filter(item_id__in=dup_ids).update(item=keep)
+            PriceItem.objects.filter(id__in=dup_ids).delete()
+            removed += len(dup_ids)
+        return Response({"groups": merged_groups, "removed": removed})
 
 
 class ImportCommitView(APIView):

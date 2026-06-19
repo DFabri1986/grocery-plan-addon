@@ -58,11 +58,15 @@ export async function parseReceipts(files) {
 export async function commitImport(items) {
   return api("import/commit/", "POST", { items });
 }
-export async function lookupPrice(name, vendor) {
-  const url = apiUrl("lookup/") + `?name=${encodeURIComponent(name)}&vendor=${encodeURIComponent(vendor)}`;
+export async function lookupPrice(name) {
+  // Polls both Woolworths and Coles; returns { name, results: { Woolworths, Coles } }.
+  const url = apiUrl("lookup/") + `?name=${encodeURIComponent(name)}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Lookup failed (${res.status})`);
   return res.json();
+}
+export async function dedupePrices() {
+  return api("dedupe/", "POST");
 }
 
 const isEditing = () => ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName);

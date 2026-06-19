@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.4.0 — 2026-06-19
+
+- **Prices always show 2 decimal places** (budget, price book, extras, import
+  review) — values format to e.g. `3.30` when not being edited.
+- **Deduplicate** button on the Prices tab: merges price-book items with
+  identical names, repointing meal-ingredient and non-food references to the
+  kept item so nothing breaks.
+- **Price refresh polls both Woolworths and Coles** and shows each price as a
+  tappable chip — tap one to set that price and supplier. The item's current
+  supplier price is auto-applied when found.
+
 ## 1.3.0 — 2026-06-18
 
 - **Price book sorting & filtering:** click any column header on the Prices tab
