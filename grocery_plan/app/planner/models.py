@@ -83,9 +83,39 @@ class MealIngredient(models.Model):
         return f"{self.meal.name}: {self.item.item} x{self.qty}"
 
 
-class PlanAssignment(models.Model):
-    """One meal placed in one (day, meal_time) slot of the week plan."""
+class Person(models.Model):
+    """A household member who has their own weekly meal plans."""
 
+    name = models.CharField(max_length=120)
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order", "id"]
+
+    def __str__(self):
+        return self.name
+
+
+class WeekPlan(models.Model):
+    """One person's plan for one calendar week (identified by its Monday)."""
+
+    person = models.ForeignKey(Person, related_name="weeks", on_delete=models.CASCADE)
+    week_start = models.DateField()
+
+    class Meta:
+        ordering = ["week_start", "id"]
+        unique_together = ("person", "week_start")
+
+    def __str__(self):
+        return f"{self.person.name} — {self.week_start}"
+
+
+class PlanAssignment(models.Model):
+    """One meal placed in one (day, meal_time) slot of a person's week plan."""
+
+    week_plan = models.ForeignKey(
+        WeekPlan, related_name="assignments", null=True, on_delete=models.CASCADE
+    )
     day = models.CharField(max_length=3, choices=DAY_CHOICES)
     meal_time = models.CharField(max_length=20, choices=MEAL_TIME_CHOICES)
     meal = models.ForeignKey(Meal, on_delete=models.CASCADE)
@@ -122,17 +152,19 @@ class Extra(models.Model):
 
 
 class ShopState(models.Model):
-    """Per-line shopping state, keyed like the React `actuals`/`got` maps:
-    f_<priceItemId>, n_<nonFoodId>, x_<extraId>."""
+    """Per-line shopping state for one calendar week, keyed like the React
+    `actuals`/`got` maps: f_<priceItemId>, n_<nonFoodId>, x_<extraId>."""
 
-    key = models.CharField(max_length=80, unique=True)
+    week_start = models.DateField(null=True)
+    key = models.CharField(max_length=80)
     got = models.BooleanField(default=False)
     actual = models.DecimalField(
         max_digits=10, decimal_places=2, null=True, blank=True
     )
 
     class Meta:
-        ordering = ["key"]
+        ordering = ["week_start", "key"]
+        unique_together = ("week_start", "key")
         verbose_name = "Shop state"
 
     def clean(self):
@@ -140,4 +172,4 @@ class ShopState(models.Model):
             raise ValidationError("key is required")
 
     def __str__(self):
-        return self.key
+        return f"{self.week_start} {self.key}"
