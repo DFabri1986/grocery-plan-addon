@@ -13,11 +13,13 @@ from .models import (
     Meal,
     MealIngredient,
     NonFoodEssential,
+    Person,
     PlanAssignment,
     PriceItem,
     Settings,
     ShopState,
     Supplier,
+    WeekPlan,
 )
 from .serializers import (
     ExtraSerializer,
@@ -129,11 +131,6 @@ def build_state():
         for m in Meal.objects.prefetch_related("items").all()
     ]
 
-    week = {d: {mt: [] for mt in MEAL_TIMES} for d in DAYS}
-    for pa in PlanAssignment.objects.all():
-        if pa.day in week and pa.meal_time in week[pa.day]:
-            week[pa.day][pa.meal_time].append(str(pa.meal_id))
-
     non_food = [
         {"id": str(n.id), "itemId": str(n.item_id), "qty": _f(n.qty)}
         for n in NonFoodEssential.objects.all()
@@ -147,24 +144,46 @@ def build_state():
         for e in Extra.objects.all()
     ]
 
-    actuals, got = {}, {}
-    for st in ShopState.objects.all():
-        if st.actual is not None:
-            actuals[st.key] = _f(st.actual)
-        if st.got:
-            got[st.key] = True
+    people = [
+        {"id": pe.id, "name": pe.name, "order": pe.order}
+        for pe in Person.objects.all()
+    ]
+
+    weeks = [
+        {"id": wp.id, "personId": wp.person_id, "weekStart": wp.week_start.isoformat()}
+        for wp in WeekPlan.objects.all()
+    ]
+
+    plans = {}
+    for wp in WeekPlan.objects.all():
+        grid = {d: {mt: [] for mt in MEAL_TIMES} for d in DAYS}
+        plans[str(wp.id)] = grid
+    for pa in PlanAssignment.objects.all():
+        grid = plans.get(str(pa.week_plan_id))
+        if grid and pa.day in grid and pa.meal_time in grid[pa.day]:
+            grid[pa.day][pa.meal_time].append(str(pa.meal_id))
+
+    shop = {}
+    for stt in ShopState.objects.all():
+        wk = stt.week_start.isoformat()
+        bucket = shop.setdefault(wk, {"actuals": {}, "got": {}})
+        if stt.actual is not None:
+            bucket["actuals"][stt.key] = _f(stt.actual)
+        if stt.got:
+            bucket["got"][stt.key] = True
 
     return {
         "budget": _f(s.budget),
         "period": s.period,
         "priceBook": price_book,
         "meals": meals,
-        "week": week,
         "nonFood": non_food,
         "extras": extras,
-        "actuals": actuals,
-        "got": got,
         "suppliers": suppliers,
+        "people": people,
+        "weeks": weeks,
+        "plans": plans,
+        "shop": shop,
     }
 
 

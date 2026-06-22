@@ -62,3 +62,28 @@ class SerializerTests(TestCase):
         data = WeekPlanSerializer(wp).data
         self.assertEqual(data["personId"], p.id)
         self.assertEqual(data["weekStart"], "2026-06-22")
+
+
+from rest_framework.test import APIClient
+
+
+class StateShapeTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_state_has_people_weeks_plans_shop(self):
+        p = Person.objects.create(name="Sara", order=0)
+        wp = WeekPlan.objects.create(person=p, week_start=datetime.date(2026, 6, 22))
+        meal = Meal.objects.create(name="Toast", meal_time="Breakfast")
+        PlanAssignment.objects.create(week_plan=wp, day="Mon", meal_time="Breakfast", meal=meal, order=0)
+        ShopState.objects.create(week_start=datetime.date(2026, 6, 22), key="f_9", actual="3.50", got=True)
+
+        st = self.client.get("/api/state/").json()
+        self.assertEqual(st["people"], [{"id": p.id, "name": "Sara", "order": 0}])
+        self.assertEqual(st["weeks"], [{"id": wp.id, "personId": p.id, "weekStart": "2026-06-22"}])
+        self.assertEqual(st["plans"][str(wp.id)]["Mon"]["Breakfast"], [str(meal.id)])
+        wk = "2026-06-22"
+        self.assertEqual(st["shop"][wk]["actuals"]["f_9"], 3.5)
+        self.assertEqual(st["shop"][wk]["got"]["f_9"], True)
+        self.assertNotIn("week", st)
+        self.assertNotIn("actuals", st)
