@@ -3,6 +3,7 @@ from django.test import TransactionTestCase as TestCase
 from django.db import IntegrityError
 from django.utils import timezone
 from planner.models import Person, WeekPlan, PlanAssignment, ShopState, Meal
+from rest_framework.test import APIClient
 
 
 def _current_monday():
@@ -64,9 +65,6 @@ class SerializerTests(TestCase):
         self.assertEqual(data["weekStart"], "2026-06-22")
 
 
-from rest_framework.test import APIClient
-
-
 class StateShapeTests(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -79,8 +77,8 @@ class StateShapeTests(TestCase):
         ShopState.objects.create(week_start=datetime.date(2026, 6, 22), key="f_9", actual="3.50", got=True)
 
         st = self.client.get("/api/state/").json()
-        self.assertEqual(st["people"], [{"id": p.id, "name": "Sara", "order": 0}])
-        self.assertEqual(st["weeks"], [{"id": wp.id, "personId": p.id, "weekStart": "2026-06-22"}])
+        self.assertEqual(st["people"], [{"id": str(p.id), "name": "Sara", "order": 0}])
+        self.assertEqual(st["weeks"], [{"id": str(wp.id), "personId": str(p.id), "weekStart": "2026-06-22"}])
         self.assertEqual(st["plans"][str(wp.id)]["Mon"]["Breakfast"], [str(meal.id)])
         wk = "2026-06-22"
         self.assertEqual(st["shop"][wk]["actuals"]["f_9"], 3.5)

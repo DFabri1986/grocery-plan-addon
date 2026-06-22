@@ -181,12 +181,12 @@ def build_state():
     ]
 
     people = [
-        {"id": pe.id, "name": pe.name, "order": pe.order}
+        {"id": str(pe.id), "name": pe.name, "order": pe.order}
         for pe in Person.objects.all()
     ]
 
     weeks = [
-        {"id": wp.id, "personId": wp.person_id, "weekStart": wp.week_start.isoformat()}
+        {"id": str(wp.id), "personId": str(wp.person_id), "weekStart": wp.week_start.isoformat()}
         for wp in WeekPlan.objects.all()
     ]
 
