@@ -47,3 +47,18 @@ class MigrationHelperTests(TestCase):
         wp2 = ensure_default_owner(Person, WeekPlan)
         self.assertEqual(wp.id, wp2.id)
         self.assertEqual(Person.objects.count(), 1)
+
+
+class SerializerTests(TestCase):
+    def test_person_serializer_fields(self):
+        from planner.serializers import PersonSerializer
+        p = Person.objects.create(name="Sara", order=2)
+        self.assertEqual(PersonSerializer(p).data, {"id": p.id, "name": "Sara", "order": 2})
+
+    def test_weekplan_serializer_camelcase(self):
+        from planner.serializers import WeekPlanSerializer
+        p = Person.objects.create(name="Sara", order=0)
+        wp = WeekPlan.objects.create(person=p, week_start=datetime.date(2026, 6, 22))
+        data = WeekPlanSerializer(wp).data
+        self.assertEqual(data["personId"], p.id)
+        self.assertEqual(data["weekStart"], "2026-06-22")

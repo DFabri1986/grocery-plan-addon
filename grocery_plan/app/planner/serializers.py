@@ -5,10 +5,12 @@ from .models import (
     Meal,
     MealIngredient,
     NonFoodEssential,
+    Person,
     PriceItem,
     Settings,
     ShopState,
     Supplier,
+    WeekPlan,
 )
 
 # Field names are camelCase to match the React data shape, so the frontend can
@@ -104,6 +106,25 @@ class ExtraSerializer(serializers.ModelSerializer):
 
 
 class ShopStateSerializer(serializers.ModelSerializer):
+    weekStart = serializers.DateField(source="week_start")
+
     class Meta:
         model = ShopState
-        fields = ["key", "got", "actual"]
+        fields = ["weekStart", "key", "got", "actual"]
+
+
+class PersonSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Person
+        fields = ["id", "name", "order"]
+
+
+class WeekPlanSerializer(serializers.ModelSerializer):
+    personId = serializers.PrimaryKeyRelatedField(
+        source="person", queryset=Person.objects.all()
+    )
+    weekStart = serializers.DateField(source="week_start")
+
+    class Meta:
+        model = WeekPlan
+        fields = ["id", "personId", "weekStart"]
