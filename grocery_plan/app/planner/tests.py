@@ -87,3 +87,35 @@ class StateShapeTests(TestCase):
         self.assertEqual(st["shop"][wk]["got"]["f_9"], True)
         self.assertNotIn("week", st)
         self.assertNotIn("actuals", st)
+
+
+class PeopleWeeksApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_create_person_and_week_and_plan(self):
+        p = self.client.post("/api/people/", {"name": "Sara", "order": 0}, format="json").json()
+        wk = self.client.post("/api/weeks/", {"personId": p["id"], "weekStart": "2026-06-22"}, format="json").json()
+        meal = Meal.objects.create(name="Toast", meal_time="Breakfast")
+        body = {"Mon": {"Breakfast": [str(meal.id)]}}
+        r = self.client.put(f"/api/weeks/{wk['id']}/plan/", body, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(PlanAssignment.objects.filter(week_plan_id=wk["id"]).count(), 1)
+        self.assertEqual(r.json()["Mon"]["Breakfast"], [str(meal.id)])
+
+    def test_shop_put_is_scoped_to_week(self):
+        ShopState.objects.create(week_start=datetime.date(2026, 6, 15), key="f_1", got=True)
+        r = self.client.put("/api/shop/", {"weekStart": "2026-06-22", "actuals": {"f_2": 4.0}, "got": {"f_2": True}}, format="json")
+        self.assertEqual(r.status_code, 200)
+        # last week's row is untouched
+        self.assertTrue(ShopState.objects.filter(week_start=datetime.date(2026, 6, 15), key="f_1").exists())
+        self.assertTrue(ShopState.objects.filter(week_start=datetime.date(2026, 6, 22), key="f_2").exists())
+
+    def test_delete_week_removes_assignments(self):
+        p = Person.objects.create(name="Sara", order=0)
+        wp = WeekPlan.objects.create(person=p, week_start=datetime.date(2026, 6, 22))
+        meal = Meal.objects.create(name="Toast", meal_time="Breakfast")
+        PlanAssignment.objects.create(week_plan=wp, day="Mon", meal_time="Breakfast", meal=meal, order=0)
+        r = self.client.delete(f"/api/weeks/{wp.id}/")
+        self.assertEqual(r.status_code, 204)
+        self.assertEqual(PlanAssignment.objects.count(), 0)

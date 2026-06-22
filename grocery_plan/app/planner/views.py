@@ -21,14 +21,17 @@ from .models import (
     Supplier,
     WeekPlan,
 )
+from rest_framework.decorators import action
 from .serializers import (
     ExtraSerializer,
     MealSerializer,
     NonFoodEssentialSerializer,
+    PersonSerializer,
     PriceItemSerializer,
     SettingsSerializer,
     ShopStateSerializer,
     SupplierSerializer,
+    WeekPlanSerializer,
 )
 from . import pricing, receipts
 
@@ -79,6 +82,39 @@ class ShopStateViewSet(viewsets.ModelViewSet):
 class SupplierViewSet(viewsets.ModelViewSet):
     queryset = Supplier.objects.all()
     serializer_class = SupplierSerializer
+
+
+class PersonViewSet(viewsets.ModelViewSet):
+    queryset = Person.objects.all()
+    serializer_class = PersonSerializer
+
+
+class WeekPlanViewSet(viewsets.ModelViewSet):
+    queryset = WeekPlan.objects.select_related("person").all()
+    serializer_class = WeekPlanSerializer
+
+    @action(detail=True, methods=["put"])
+    @transaction.atomic
+    def plan(self, request, pk=None):
+        wp = self.get_object()
+        grid = request.data or {}
+        valid_meal_ids = set(Meal.objects.values_list("id", flat=True))
+        PlanAssignment.objects.filter(week_plan=wp).delete()
+        rows = []
+        for day in DAYS:
+            day_plan = grid.get(day, {}) or {}
+            for mt in MEAL_TIMES:
+                for order, meal_id in enumerate(day_plan.get(mt, []) or []):
+                    try:
+                        mid = int(meal_id)
+                    except (TypeError, ValueError):
+                        continue
+                    if mid in valid_meal_ids:
+                        rows.append(PlanAssignment(
+                            week_plan=wp, day=day, meal_time=mt, meal_id=mid, order=order
+                        ))
+        PlanAssignment.objects.bulk_create(rows)
+        return Response(build_state()["plans"][str(wp.id)])
 
 
 # --------------------------------------------------------------------------- #
@@ -202,47 +238,17 @@ class ConfigView(APIView):
 # --------------------------------------------------------------------------- #
 #  Bulk projections that don't map 1:1 to a single row
 # --------------------------------------------------------------------------- #
-class WeekView(APIView):
-    """The week plan is a denormalised projection of PlanAssignment. Replacing
-    the whole set on every change keeps the client simple and is idempotent
-    (last-write-wins)."""
-
-    def get(self, request):
-        return Response(build_state()["week"])
-
-    @transaction.atomic
-    def put(self, request):
-        week = request.data or {}
-        valid_meal_ids = set(Meal.objects.values_list("id", flat=True))
-        PlanAssignment.objects.all().delete()
-        rows = []
-        for day in DAYS:
-            day_plan = week.get(day, {}) or {}
-            for mt in MEAL_TIMES:
-                for order, meal_id in enumerate(day_plan.get(mt, []) or []):
-                    try:
-                        mid = int(meal_id)
-                    except (TypeError, ValueError):
-                        continue
-                    if mid in valid_meal_ids:
-                        rows.append(
-                            PlanAssignment(
-                                day=day, meal_time=mt, meal_id=mid, order=order
-                            )
-                        )
-        PlanAssignment.objects.bulk_create(rows)
-        return Response(build_state()["week"])
-
-
 class ShopView(APIView):
-    """Bulk upsert of the actuals/got maps (keyed f_/n_/x_)."""
+    """Per-calendar-week bulk upsert of the actuals/got maps (keyed f_/n_/x_)."""
 
     def get(self, request):
-        st = build_state()
-        return Response({"actuals": st["actuals"], "got": st["got"]})
+        return Response(build_state()["shop"])
 
     @transaction.atomic
     def put(self, request):
+        week_start = request.data.get("weekStart")
+        if not week_start:
+            return Response({"detail": "weekStart is required"}, status=400)
         actuals = request.data.get("actuals", {}) or {}
         got = request.data.get("got", {}) or {}
         keys = set(actuals) | set(got)
@@ -250,15 +256,15 @@ class ShopView(APIView):
             actual_val = _to_decimal(actuals.get(key))
             got_val = bool(got.get(key))
             if actual_val is None and not got_val:
-                ShopState.objects.filter(key=key).delete()
+                ShopState.objects.filter(week_start=week_start, key=key).delete()
             else:
                 ShopState.objects.update_or_create(
-                    key=key, defaults={"got": got_val, "actual": actual_val}
+                    week_start=week_start, key=key,
+                    defaults={"got": got_val, "actual": actual_val},
                 )
-        # Drop any keys the client no longer tracks.
-        ShopState.objects.exclude(key__in=keys).delete()
-        st = build_state()
-        return Response({"actuals": st["actuals"], "got": st["got"]})
+        # Drop only this week's keys the client no longer tracks.
+        ShopState.objects.filter(week_start=week_start).exclude(key__in=keys).delete()
+        return Response(build_state()["shop"].get(str(week_start), {"actuals": {}, "got": {}}))
 
 
 # --------------------------------------------------------------------------- #
