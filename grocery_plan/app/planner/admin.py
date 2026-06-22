@@ -6,11 +6,13 @@ from .models import (
     Meal,
     MealIngredient,
     NonFoodEssential,
+    Person,
     PlanAssignment,
     PriceItem,
     Settings,
     ShopState,
     Supplier,
+    WeekPlan,
 )
 
 
@@ -18,6 +20,18 @@ from .models import (
 class SupplierAdmin(ModelAdmin):
     list_display = ("name",)
     search_fields = ("name",)
+
+
+@admin.register(Person)
+class PersonAdmin(ModelAdmin):
+    list_display = ("name", "order")
+    list_editable = ("order",)
+
+
+@admin.register(WeekPlan)
+class WeekPlanAdmin(ModelAdmin):
+    list_display = ("person", "week_start")
+    list_filter = ("person",)
 
 
 @admin.register(Settings)
@@ -56,8 +70,8 @@ class MealAdmin(ModelAdmin):
 
 @admin.register(PlanAssignment)
 class PlanAssignmentAdmin(ModelAdmin):
-    list_display = ("day", "meal_time", "meal", "order")
-    list_filter = ("day", "meal_time")
+    list_display = ("week_plan", "day", "meal_time", "meal", "order")
+    list_filter = ("week_plan", "day", "meal_time")
     autocomplete_fields = ("meal",)
 
 
@@ -74,5 +88,5 @@ class ExtraAdmin(ModelAdmin):
 
 @admin.register(ShopState)
 class ShopStateAdmin(ModelAdmin):
-    list_display = ("key", "got", "actual")
+    list_display = ("week_start", "key", "got", "actual")
     search_fields = ("key",)

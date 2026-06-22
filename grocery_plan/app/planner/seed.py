@@ -11,9 +11,11 @@ from .models import (
     Meal,
     MealIngredient,
     NonFoodEssential,
+    Person,
     PlanAssignment,
     PriceItem,
     Settings,
+    WeekPlan,
 )
 
 SCHOOL = {"Mon", "Tue", "Wed", "Thu", "Fri"}
@@ -78,6 +80,9 @@ NON_FOOD = [
 
 @transaction.atomic
 def seed():
+    from .migrations_support import ensure_default_owner
+    week_plan = ensure_default_owner(Person, WeekPlan)
+
     Settings.objects.update_or_create(
         pk=1,
         defaults={
@@ -123,7 +128,7 @@ def seed():
             for order, mname in enumerate(meal_names):
                 rows.append(
                     PlanAssignment(
-                        day=day, meal_time=mt, meal=meals[mname], order=order
+                        week_plan=week_plan, day=day, meal_time=mt, meal=meals[mname], order=order
                     )
                 )
     PlanAssignment.objects.bulk_create(rows)

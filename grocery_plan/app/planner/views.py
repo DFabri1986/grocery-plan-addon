@@ -13,20 +13,25 @@ from .models import (
     Meal,
     MealIngredient,
     NonFoodEssential,
+    Person,
     PlanAssignment,
     PriceItem,
     Settings,
     ShopState,
     Supplier,
+    WeekPlan,
 )
+from rest_framework.decorators import action
 from .serializers import (
     ExtraSerializer,
     MealSerializer,
     NonFoodEssentialSerializer,
+    PersonSerializer,
     PriceItemSerializer,
     SettingsSerializer,
     ShopStateSerializer,
     SupplierSerializer,
+    WeekPlanSerializer,
 )
 from . import pricing, receipts
 
@@ -79,6 +84,39 @@ class SupplierViewSet(viewsets.ModelViewSet):
     serializer_class = SupplierSerializer
 
 
+class PersonViewSet(viewsets.ModelViewSet):
+    queryset = Person.objects.all()
+    serializer_class = PersonSerializer
+
+
+class WeekPlanViewSet(viewsets.ModelViewSet):
+    queryset = WeekPlan.objects.select_related("person").all()
+    serializer_class = WeekPlanSerializer
+
+    @action(detail=True, methods=["put"])
+    @transaction.atomic
+    def plan(self, request, pk=None):
+        wp = self.get_object()
+        grid = request.data or {}
+        valid_meal_ids = set(Meal.objects.values_list("id", flat=True))
+        PlanAssignment.objects.filter(week_plan=wp).delete()
+        rows = []
+        for day in DAYS:
+            day_plan = grid.get(day, {}) or {}
+            for mt in MEAL_TIMES:
+                for order, meal_id in enumerate(day_plan.get(mt, []) or []):
+                    try:
+                        mid = int(meal_id)
+                    except (TypeError, ValueError):
+                        continue
+                    if mid in valid_meal_ids:
+                        rows.append(PlanAssignment(
+                            week_plan=wp, day=day, meal_time=mt, meal_id=mid, order=order
+                        ))
+        PlanAssignment.objects.bulk_create(rows)
+        return Response(build_state()["plans"][str(wp.id)])
+
+
 # --------------------------------------------------------------------------- #
 #  Singleton settings
 # --------------------------------------------------------------------------- #
@@ -129,11 +167,6 @@ def build_state():
         for m in Meal.objects.prefetch_related("items").all()
     ]
 
-    week = {d: {mt: [] for mt in MEAL_TIMES} for d in DAYS}
-    for pa in PlanAssignment.objects.all():
-        if pa.day in week and pa.meal_time in week[pa.day]:
-            week[pa.day][pa.meal_time].append(str(pa.meal_id))
-
     non_food = [
         {"id": str(n.id), "itemId": str(n.item_id), "qty": _f(n.qty)}
         for n in NonFoodEssential.objects.all()
@@ -147,24 +180,46 @@ def build_state():
         for e in Extra.objects.all()
     ]
 
-    actuals, got = {}, {}
-    for st in ShopState.objects.all():
-        if st.actual is not None:
-            actuals[st.key] = _f(st.actual)
-        if st.got:
-            got[st.key] = True
+    people = [
+        {"id": str(pe.id), "name": pe.name, "order": pe.order}
+        for pe in Person.objects.all()
+    ]
+
+    weeks = [
+        {"id": str(wp.id), "personId": str(wp.person_id), "weekStart": wp.week_start.isoformat()}
+        for wp in WeekPlan.objects.all()
+    ]
+
+    plans = {}
+    for wp in WeekPlan.objects.all():
+        grid = {d: {mt: [] for mt in MEAL_TIMES} for d in DAYS}
+        plans[str(wp.id)] = grid
+    for pa in PlanAssignment.objects.all():
+        grid = plans.get(str(pa.week_plan_id))
+        if grid and pa.day in grid and pa.meal_time in grid[pa.day]:
+            grid[pa.day][pa.meal_time].append(str(pa.meal_id))
+
+    shop = {}
+    for stt in ShopState.objects.all():
+        wk = stt.week_start.isoformat()
+        bucket = shop.setdefault(wk, {"actuals": {}, "got": {}})
+        if stt.actual is not None:
+            bucket["actuals"][stt.key] = _f(stt.actual)
+        if stt.got:
+            bucket["got"][stt.key] = True
 
     return {
         "budget": _f(s.budget),
         "period": s.period,
         "priceBook": price_book,
         "meals": meals,
-        "week": week,
         "nonFood": non_food,
         "extras": extras,
-        "actuals": actuals,
-        "got": got,
         "suppliers": suppliers,
+        "people": people,
+        "weeks": weeks,
+        "plans": plans,
+        "shop": shop,
     }
 
 
@@ -183,47 +238,17 @@ class ConfigView(APIView):
 # --------------------------------------------------------------------------- #
 #  Bulk projections that don't map 1:1 to a single row
 # --------------------------------------------------------------------------- #
-class WeekView(APIView):
-    """The week plan is a denormalised projection of PlanAssignment. Replacing
-    the whole set on every change keeps the client simple and is idempotent
-    (last-write-wins)."""
-
-    def get(self, request):
-        return Response(build_state()["week"])
-
-    @transaction.atomic
-    def put(self, request):
-        week = request.data or {}
-        valid_meal_ids = set(Meal.objects.values_list("id", flat=True))
-        PlanAssignment.objects.all().delete()
-        rows = []
-        for day in DAYS:
-            day_plan = week.get(day, {}) or {}
-            for mt in MEAL_TIMES:
-                for order, meal_id in enumerate(day_plan.get(mt, []) or []):
-                    try:
-                        mid = int(meal_id)
-                    except (TypeError, ValueError):
-                        continue
-                    if mid in valid_meal_ids:
-                        rows.append(
-                            PlanAssignment(
-                                day=day, meal_time=mt, meal_id=mid, order=order
-                            )
-                        )
-        PlanAssignment.objects.bulk_create(rows)
-        return Response(build_state()["week"])
-
-
 class ShopView(APIView):
-    """Bulk upsert of the actuals/got maps (keyed f_/n_/x_)."""
+    """Per-calendar-week bulk upsert of the actuals/got maps (keyed f_/n_/x_)."""
 
     def get(self, request):
-        st = build_state()
-        return Response({"actuals": st["actuals"], "got": st["got"]})
+        return Response(build_state()["shop"])
 
     @transaction.atomic
     def put(self, request):
+        week_start = request.data.get("weekStart")
+        if not week_start:
+            return Response({"detail": "weekStart is required"}, status=400)
         actuals = request.data.get("actuals", {}) or {}
         got = request.data.get("got", {}) or {}
         keys = set(actuals) | set(got)
@@ -231,15 +256,15 @@ class ShopView(APIView):
             actual_val = _to_decimal(actuals.get(key))
             got_val = bool(got.get(key))
             if actual_val is None and not got_val:
-                ShopState.objects.filter(key=key).delete()
+                ShopState.objects.filter(week_start=week_start, key=key).delete()
             else:
                 ShopState.objects.update_or_create(
-                    key=key, defaults={"got": got_val, "actual": actual_val}
+                    week_start=week_start, key=key,
+                    defaults={"got": got_val, "actual": actual_val},
                 )
-        # Drop any keys the client no longer tracks.
-        ShopState.objects.exclude(key__in=keys).delete()
-        st = build_state()
-        return Response({"actuals": st["actuals"], "got": st["got"]})
+        # Drop only this week's keys the client no longer tracks.
+        ShopState.objects.filter(week_start=week_start).exclude(key__in=keys).delete()
+        return Response(build_state()["shop"].get(str(week_start), {"actuals": {}, "got": {}}))
 
 
 # --------------------------------------------------------------------------- #

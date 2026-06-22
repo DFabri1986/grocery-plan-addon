@@ -43,8 +43,9 @@ async function api(path, method = "GET", body) {
 
 /* ---------- empty/initial state ---------- */
 const EMPTY = {
-  budget: 0, period: "Week", priceBook: [], meals: [], week: {},
-  nonFood: [], extras: [], actuals: {}, got: {}, suppliers: [],
+  budget: 0, period: "Week", priceBook: [], meals: [],
+  nonFood: [], extras: [], suppliers: [],
+  people: [], weeks: [], plans: {}, shop: {},
 };
 
 /* ---------- receipt import (multipart upload, outside the sync engine) ---------- */

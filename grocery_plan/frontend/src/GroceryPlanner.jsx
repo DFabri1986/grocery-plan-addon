@@ -22,6 +22,19 @@ const CATEGORIES = [
   "Baby & Kids", "Pet",
 ];
 
+/* ---------- calendar-week helpers ---------- */
+const pad = (n) => String(n).padStart(2, "0");
+const isoDate = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const mondayOf = (d) => { const x = new Date(d); const wd = (x.getDay() + 6) % 7; x.setDate(x.getDate() - wd); x.setHours(0, 0, 0, 0); return x; };
+const currentMonday = () => isoDate(mondayOf(new Date()));
+const addDays = (iso, n) => { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + n); return isoDate(d); };
+const fmtWeek = (iso) => { const d = new Date(iso + "T00:00:00"); return d.toLocaleDateString(undefined, { day: "numeric", month: "short" }); };
+const mondayOfIso = (iso) => isoDate(mondayOf(new Date(iso + "T00:00:00")));
+const findWeek = (data, personId, weekStart) =>
+  (data.weeks || []).find((w) => String(w.personId) === String(personId) && w.weekStart === weekStart);
+const emptyGrid = () => Object.fromEntries(DAYS.map((d) => [d, Object.fromEntries(MEALTIMES.map((mt) => [mt, []]))]));
+
+
 /* ---------- shopping-unit rounding ----------
    You can't buy 2.7 loaves, so aggregated shopping quantities round UP — except
    for loose weight/volume units (kg, g, L…), where a fraction is fine. */
@@ -74,6 +87,12 @@ export default function GroceryPlanner() {
   const { data, setData, status, reload } = useSyncedData();
   const [tab, setTab] = useState("week");
   const [copied, setCopied] = useState(false);
+  const [weekStart, setWeekStart] = useState(currentMonday());
+  const [personId, setPersonId] = useState(null);
+  // default the person selector to the first person once data arrives
+  React.useEffect(() => {
+    if (data && personId == null && (data.people || []).length) setPersonId(String(data.people[0].id));
+  }, [data, personId]);
 
   const patch = (p) => setData((d) => ({ ...d, ...p }));
 
@@ -82,38 +101,34 @@ export default function GroceryPlanner() {
     if (!data) return { list: [], byMeal: {}, total: 0 };
     const map = {};
     const byMeal = { Breakfast: 0, Recess: 0, Lunch: 0, Dinner: 0, Snacks: 0 };
-    // Pass 1: aggregate the raw (fractional) quantity per item, tracking how
-    // much each meal time contributes so we can split the cost afterwards.
-    DAYS.forEach((day) => MEALTIMES.forEach((mt) => {
-      (data.week[day]?.[mt] || []).forEach((mealId) => {
-        const meal = data.meals.find((m) => m.id === mealId);
-        if (!meal) return;
-        meal.items.forEach((ing) => {
-          const pb = data.priceBook.find((p) => p.id === ing.itemId);
-          if (!pb || !pb.isFood) return;
-          const q = num(ing.qty);
-          if (!map[pb.id]) map[pb.id] = { id: pb.id, item: pb.item, category: pb.category, unit: pb.unit, price: num(pb.price), rawQty: 0, timeQty: {}, times: {} };
-          map[pb.id].rawQty += q;
-          map[pb.id].timeQty[mt] = (map[pb.id].timeQty[mt] || 0) + q;
-          map[pb.id].times[mt] = true;
+    // every week that belongs to the selected calendar week, across all people
+    const weekIds = (data.weeks || []).filter((w) => w.weekStart === weekStart).map((w) => String(w.id));
+    weekIds.forEach((wid) => {
+      const grid = data.plans[wid] || {};
+      DAYS.forEach((day) => MEALTIMES.forEach((mt) => {
+        (grid[day]?.[mt] || []).forEach((mealId) => {
+          const meal = data.meals.find((m) => m.id === mealId);
+          if (!meal) return;
+          meal.items.forEach((ing) => {
+            const pb = data.priceBook.find((p) => p.id === ing.itemId);
+            if (!pb || !pb.isFood) return;
+            const q = num(ing.qty);
+            if (!map[pb.id]) map[pb.id] = { id: pb.id, item: pb.item, category: pb.category, unit: pb.unit, price: num(pb.price), rawQty: 0, timeQty: {}, times: {} };
+            map[pb.id].rawQty += q;
+            map[pb.id].timeQty[mt] = (map[pb.id].timeQty[mt] || 0) + q;
+            map[pb.id].times[mt] = true;
+          });
         });
-      });
-    }));
-    // Pass 2: round the shopping quantity up to whole units (except loose
-    // weight/volume units), recompute cost on the rounded quantity, and
-    // attribute that cost back to each meal time in proportion to its share.
+      }));
+    });
     const list = Object.values(map).map((x) => {
       const qty = roundQty(x.rawQty, x.unit);
       const cost = qty * x.price;
-      if (x.rawQty > 0) {
-        MEALTIMES.forEach((mt) => {
-          if (x.timeQty[mt]) byMeal[mt] += cost * (x.timeQty[mt] / x.rawQty);
-        });
-      }
+      if (x.rawQty > 0) MEALTIMES.forEach((mt) => { if (x.timeQty[mt]) byMeal[mt] += cost * (x.timeQty[mt] / x.rawQty); });
       return { id: x.id, item: x.item, category: x.category, unit: x.unit, qty, cost, times: MEALTIMES.filter((t) => x.times[t]) };
     }).sort((a, b) => a.category.localeCompare(b.category) || a.item.localeCompare(b.item));
     return { list, byMeal, total: list.reduce((s, x) => s + x.cost, 0) };
-  }, [data]);
+  }, [data, weekStart]);
 
   const nonFoodRows = useMemo(() => {
     if (!data) return [];
@@ -132,13 +147,15 @@ export default function GroceryPlanner() {
   const extrasEst = data.extras.reduce((s, e) => s + num(e.qty) * num(e.price), 0);
   const leftForExtras = num(data.budget) - essEst;
   const plannedBal = num(data.budget) - essEst - extrasEst;
-  const actualSpent = Object.values(data.actuals).reduce((s, v) => s + num(v), 0);
+  const shopWeek = (data.shop && data.shop[weekStart]) || { actuals: {}, got: {} };
+  const setShopWeek = (next) => patch({ shop: { ...(data.shop || {}), [weekStart]: next } });
+  const actualSpent = Object.values(shopWeek.actuals).reduce((s, v) => s + num(v), 0);
   const actualBal = num(data.budget) - actualSpent;
 
-  const aGet = (k) => data.actuals[k] ?? "";
-  const aSet = (k, v) => patch({ actuals: { ...data.actuals, [k]: v } });
-  const gGet = (k) => !!data.got[k];
-  const gTog = (k) => patch({ got: { ...data.got, [k]: !data.got[k] } });
+  const aGet = (k) => shopWeek.actuals[k] ?? "";
+  const aSet = (k, v) => setShopWeek({ actuals: { ...shopWeek.actuals, [k]: v }, got: shopWeek.got });
+  const gGet = (k) => !!shopWeek.got[k];
+  const gTog = (k) => setShopWeek({ actuals: shopWeek.actuals, got: { ...shopWeek.got, [k]: !shopWeek.got[k] } });
 
   /* ---- copy shopping list ---- */
   const copyList = () => {
@@ -177,6 +194,12 @@ export default function GroceryPlanner() {
             <div style={{ color: "#BFE0CF" }} className="text-xs">Plan meals once → the shopping list builds itself. Essentials first, extras after.</div>
           </div>
           <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 px-2 py-1 rounded-md" style={{ background: "rgba(255,255,255,0.15)" }}>
+              <button onClick={() => setWeekStart((w) => addDays(w, -7))} title="Previous week" style={{ color: "#fff" }}>‹</button>
+              <input type="date" value={weekStart} onChange={(e) => e.target.value && setWeekStart(mondayOfIso(e.target.value))}
+                className="bg-transparent text-white text-xs outline-none" style={{ colorScheme: "dark" }} />
+              <button onClick={() => setWeekStart((w) => addDays(w, 7))} title="Next week" style={{ color: "#fff" }}>›</button>
+            </div>
             <div className="flex items-center gap-1.5 px-2 py-1 rounded-md" style={{ background: C.yellow }}>
               <span className="text-xs font-semibold" style={{ color: C.dark }}>Budget</span>
               <PriceInput value={data.budget} onCommit={(v) => patch({ budget: v })}
@@ -210,7 +233,12 @@ export default function GroceryPlanner() {
       </div>
 
       <div className="p-3 sm:p-6">
-        {tab === "week" && <WeekPlan data={data} setData={setData} />}
+        {tab === "week" && (
+          <WeekPlan
+            data={data} setData={setData}
+            weekStart={weekStart} personId={personId} setPersonId={setPersonId}
+          />
+        )}
         {tab === "meals" && <Meals data={data} setData={setData} />}
         {tab === "prices" && <Prices data={data} setData={setData} reload={reload} />}
         {tab === "grocery" && (
@@ -227,68 +255,153 @@ export default function GroceryPlanner() {
 }
 
 /* ============================================================= WEEK PLAN */
-function WeekPlan({ data, setData }) {
+function WeekPlan({ data, setData, weekStart, personId, setPersonId }) {
+  const people = data.people || [];
   const mealName = (id) => data.meals.find((m) => m.id === id)?.name || "?";
+  const week = personId != null ? findWeek(data, personId, weekStart) : null;
+  const grid = week ? (data.plans[String(week.id)] || emptyGrid()) : null;
+
+  const writeGrid = (weekId, nextGrid) =>
+    setData({ ...data, plans: { ...data.plans, [String(weekId)]: nextGrid } });
+
   const add = (day, mt, mealId) => {
-    if (!mealId) return;
-    const week = structuredClone(data.week);
-    week[day][mt] = [...(week[day][mt] || []), mealId];
-    setData({ ...data, week });
+    if (!mealId || !week) return;
+    const g = structuredClone(grid);
+    g[day][mt] = [...(g[day][mt] || []), mealId];
+    writeGrid(week.id, g);
   };
   const remove = (day, mt, idx) => {
-    const week = structuredClone(data.week);
-    week[day][mt].splice(idx, 1);
-    setData({ ...data, week });
+    const g = structuredClone(grid);
+    g[day][mt].splice(idx, 1);
+    writeGrid(week.id, g);
   };
+
+  const addPerson = () => {
+    const name = window.prompt("New person's name?");
+    if (!name) return;
+    const id = uid();
+    const order = people.length;
+    setData({ ...data, people: [...people, { id, name, order }] });
+    setPersonId(String(id));
+  };
+  const renamePerson = () => {
+    if (!personId) return;
+    const cur = people.find((p) => String(p.id) === String(personId));
+    const name = window.prompt("Rename person", cur?.name || "");
+    if (!name) return;
+    setData({ ...data, people: people.map((p) => (String(p.id) === String(personId) ? { ...p, name } : p)) });
+  };
+  const deletePerson = () => {
+    if (!personId) return;
+    if (!window.confirm("Delete this person and all their week plans?")) return;
+    const remainingWeeks = (data.weeks || []).filter((w) => String(w.personId) !== String(personId));
+    const removedIds = new Set((data.weeks || []).filter((w) => String(w.personId) === String(personId)).map((w) => String(w.id)));
+    const plans = Object.fromEntries(Object.entries(data.plans).filter(([wid]) => !removedIds.has(wid)));
+    const nextPeople = people.filter((p) => String(p.id) !== String(personId));
+    setData({ ...data, people: nextPeople, weeks: remainingWeeks, plans });
+    setPersonId(nextPeople.length ? String(nextPeople[0].id) : null);
+  };
+
+  const addWeek = (copyFromWeekId) => {
+    if (!personId) return;
+    const id = uid();
+    const newGrid = copyFromWeekId ? structuredClone(data.plans[String(copyFromWeekId)] || emptyGrid()) : emptyGrid();
+    setData({
+      ...data,
+      weeks: [...(data.weeks || []), { id, personId, weekStart }],
+      plans: { ...data.plans, [String(id)]: newGrid },
+    });
+  };
+  const personWeeks = (data.weeks || []).filter((w) => String(w.personId) === String(personId));
+
   return (
     <div>
       <SectionTitle>Week Plan</SectionTitle>
       <p className="text-sm mb-3" style={{ color: C.sub }}>
-        Drop a meal into each slot. Recess &amp; Lunch are the kids' school days (greyed on weekends).
-        Whatever you put here flows straight onto the Grocery Plan.
+        Pick a person and a week (top right). Recess &amp; Lunch are the kids' school days (greyed on weekends).
+        Each person's plan for the selected week flows onto the shared Grocery Plan.
       </p>
-      <div className="overflow-x-auto rounded-lg" style={{ border: `1px solid ${C.line}` }}>
-        <table className="w-full border-collapse text-sm" style={{ minWidth: 760 }}>
-          <thead>
-            <tr>
-              <th style={th(C.mid)} className="text-left w-24">Meal time</th>
-              {DAYS.map((d) => <th key={d} style={th(C.mid)}>{d}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {MEALTIMES.map((mt) => (
-              <tr key={mt}>
-                <td style={{ ...td(), background: C.light, fontWeight: 700, color: C.dark }}>{mt}</td>
-                {DAYS.map((d) => {
-                  const weekendRecess = mt === "Recess" && !SCHOOL.has(d);
-                  const slot = data.week[d]?.[mt] || [];
-                  return (
-                    <td key={d} style={{ ...td(), background: weekendRecess ? "#EEF1EF" : "#fff", verticalAlign: "top" }}>
-                      {weekendRecess ? <span style={{ color: "#AAB3AE" }}>—</span> : (
-                        <div className="flex flex-col gap-1">
-                          {slot.map((mid, i) => (
-                            <span key={i} className="inline-flex items-center justify-between gap-1 px-1.5 py-1 rounded"
-                              style={{ background: C.band, border: `1px solid ${C.line}` }}>
-                              <span className="truncate">{mealName(mid)}</span>
-                              <button onClick={() => remove(d, mt, i)} style={{ color: C.sub }}><X size={13} /></button>
-                            </span>
-                          ))}
-                          <select value="" onChange={(e) => { add(d, mt, e.target.value); e.target.value = ""; }}
-                            className="text-xs rounded px-1 py-1 outline-none" style={{ border: `1px dashed ${C.line}`, color: C.sub }}>
-                            <option value="">+ add…</option>
-                            {[...data.meals].sort((a, b) => (a.mealTime === mt ? -1 : 1) - (b.mealTime === mt ? -1 : 1) || a.name.localeCompare(b.name))
-                              .map((m) => <option key={m.id} value={m.id}>{m.name}{m.mealTime !== mt ? ` (${m.mealTime})` : ""}</option>)}
-                          </select>
-                        </div>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+
+      {/* person switcher */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        {people.map((p) => (
+          <button key={p.id} onClick={() => setPersonId(String(p.id))}
+            className="px-3 py-1.5 rounded-md text-sm font-medium"
+            style={{
+              background: String(p.id) === String(personId) ? C.dark : "#fff",
+              color: String(p.id) === String(personId) ? "#fff" : C.dark,
+              border: `1px solid ${C.line}`,
+            }}>{p.name}</button>
+        ))}
+        <Btn tone="ghost" onClick={addPerson}><Plus size={15} />Add person</Btn>
+        {personId && <Btn tone="ghost" onClick={renamePerson}>Rename</Btn>}
+        {personId && <Btn tone="danger" onClick={deletePerson}><Trash2 size={14} /></Btn>}
       </div>
+
+      {!people.length && (
+        <div className="text-sm px-3 py-4 rounded-lg" style={{ border: `1px solid ${C.line}`, color: C.sub }}>
+          Add a person to start planning their week.
+        </div>
+      )}
+
+      {personId && !week && (
+        <div className="text-sm px-3 py-4 rounded-lg flex items-center gap-3" style={{ border: `1px solid ${C.line}`, color: C.sub }}>
+          <span>No plan for {fmtWeek(weekStart)} yet.</span>
+          <Btn tone="solid" onClick={() => addWeek(null)}><Plus size={15} />Blank week</Btn>
+          {personWeeks.length > 0 && (
+            <select defaultValue="" onChange={(e) => { if (e.target.value) addWeek(e.target.value); }}
+              className="text-sm rounded px-2 py-1 outline-none" style={{ border: `1px solid ${C.line}` }}>
+              <option value="">Copy from…</option>
+              {personWeeks.map((w) => <option key={w.id} value={w.id}>{fmtWeek(w.weekStart)}</option>)}
+            </select>
+          )}
+        </div>
+      )}
+
+      {week && grid && (
+        <div className="overflow-x-auto rounded-lg" style={{ border: `1px solid ${C.line}` }}>
+          <table className="w-full border-collapse text-sm" style={{ minWidth: 760 }}>
+            <thead>
+              <tr>
+                <th style={th(C.mid)} className="text-left w-24">Meal time</th>
+                {DAYS.map((d) => <th key={d} style={th(C.mid)}>{d}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {MEALTIMES.map((mt) => (
+                <tr key={mt}>
+                  <td style={{ ...td(), background: C.light, fontWeight: 700, color: C.dark }}>{mt}</td>
+                  {DAYS.map((d) => {
+                    const weekendRecess = mt === "Recess" && !SCHOOL.has(d);
+                    const slot = grid[d]?.[mt] || [];
+                    return (
+                      <td key={d} style={{ ...td(), background: weekendRecess ? "#EEF1EF" : "#fff", verticalAlign: "top" }}>
+                        {weekendRecess ? <span style={{ color: "#AAB3AE" }}>—</span> : (
+                          <div className="flex flex-col gap-1">
+                            {slot.map((mid, i) => (
+                              <span key={i} className="inline-flex items-center justify-between gap-1 px-1.5 py-1 rounded"
+                                style={{ background: C.band, border: `1px solid ${C.line}` }}>
+                                <span className="truncate">{mealName(mid)}</span>
+                                <button onClick={() => remove(d, mt, i)} style={{ color: C.sub }}><X size={13} /></button>
+                              </span>
+                            ))}
+                            <select value="" onChange={(e) => { add(d, mt, e.target.value); e.target.value = ""; }}
+                              className="text-xs rounded px-1 py-1 outline-none" style={{ border: `1px dashed ${C.line}`, color: C.sub }}>
+                              <option value="">+ add…</option>
+                              {[...data.meals].sort((a, b) => (a.mealTime === mt ? -1 : 1) - (b.mealTime === mt ? -1 : 1) || a.name.localeCompare(b.name))
+                                .map((m) => <option key={m.id} value={m.id}>{m.name}{m.mealTime !== mt ? ` (${m.mealTime})` : ""}</option>)}
+                            </select>
+                          </div>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.0 — 2026-06-22
+
+- **People & multiple week plans.** Add household members, each with their own
+  calendar-dated week plans.
+- **Shopping-week selector.** Pick a week; the grocery list totals every
+  person's plan for that week into one household shop.
+- New weeks start blank or copy an existing week.
+- Got/actual shopping state is now tracked per week.
+
 ## 1.4.0 — 2026-06-19
 
 - **Prices always show 2 decimal places** (budget, price book, extras, import
