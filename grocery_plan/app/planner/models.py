@@ -155,7 +155,7 @@ class ShopState(models.Model):
     """Per-line shopping state for one calendar week, keyed like the React
     `actuals`/`got` maps: f_<priceItemId>, n_<nonFoodId>, x_<extraId>."""
 
-    week_start = models.DateField(null=True)
+    week_start = models.DateField()
     key = models.CharField(max_length=80)
     got = models.BooleanField(default=False)
     actual = models.DecimalField(

@@ -1,7 +1,13 @@
 import datetime
 from django.test import TransactionTestCase as TestCase
 from django.db import IntegrityError
+from django.utils import timezone
 from planner.models import Person, WeekPlan, PlanAssignment, ShopState, Meal
+
+
+def _current_monday():
+    today = timezone.localdate()
+    return today - datetime.timedelta(days=today.weekday())
 
 
 class PeopleWeekModelTests(TestCase):
@@ -29,3 +35,15 @@ class PeopleWeekModelTests(TestCase):
         # same key, different week is allowed
         ShopState.objects.create(week_start=datetime.date(2026, 6, 29), key="f_1", got=True)
         self.assertEqual(ShopState.objects.count(), 2)
+
+
+class MigrationHelperTests(TestCase):
+    def test_ensure_default_owner_creates_person_and_week(self):
+        from planner.migrations_support import ensure_default_owner
+        wp = ensure_default_owner(Person, WeekPlan)
+        self.assertEqual(wp.person.name, "Household")
+        self.assertEqual(wp.week_start, _current_monday())
+        # idempotent
+        wp2 = ensure_default_owner(Person, WeekPlan)
+        self.assertEqual(wp.id, wp2.id)
+        self.assertEqual(Person.objects.count(), 1)
