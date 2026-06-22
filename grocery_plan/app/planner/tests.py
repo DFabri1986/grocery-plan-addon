@@ -119,3 +119,13 @@ class PeopleWeeksApiTests(TestCase):
         r = self.client.delete(f"/api/weeks/{wp.id}/")
         self.assertEqual(r.status_code, 204)
         self.assertEqual(PlanAssignment.objects.count(), 0)
+
+
+class SeedTests(TestCase):
+    def test_seed_creates_person_and_week_with_assignments(self):
+        from planner.seed import seed
+        seed()
+        self.assertEqual(Person.objects.count(), 1)
+        self.assertTrue(WeekPlan.objects.filter(person__name="Household").exists())
+        wp = WeekPlan.objects.get(person__name="Household")
+        self.assertTrue(PlanAssignment.objects.filter(week_plan=wp).exists())
